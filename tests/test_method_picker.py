@@ -1,25 +1,13 @@
-# -*- coding: utf-8 -*-
-"""MethodPickerDialog 契约（P0-2）：非模态 Tool 窗 / 双击连续添加 /
-搜索复位 / Esc / 外部点击关闭；处理页添加按钮与替换方法共用单实例。
+"""Algorithm search and continuous adding inside the processing tools."""
+import pytest
 
-offscreen 平台下真实焦点移交不可靠（架构共享知识 5.2）：外部点击关闭
-走内部复核函数 ``_close_if_focus_left`` 契约，真机走查补外部点击。
-"""
-from __future__ import annotations
+pytest.importorskip('PyQt6')
 
-import os
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
 
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-
-import pytest  # noqa: E402
-
-pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
-
-from PyQt6.QtCore import Qt  # noqa: E402
-from PyQt6.QtGui import QKeyEvent  # noqa: E402
-from PyQt6.QtWidgets import QApplication  # noqa: E402
-
-from ui.widgets.method_picker import MethodPickerDialog  # noqa: E402
+from tests.test_processing_workspace_flow import bundle
+from ui.pages.processing_page import ProcessingPage
 
 
 def _methods() -> list:
@@ -33,326 +21,104 @@ def _methods() -> list:
     ]
 
 
+
 @pytest.fixture
-def picker(qapp):
-    w = MethodPickerDialog()
-    w.set_methods(_methods())
-    yield w
-    w.close()
-    w.deleteLater()
-
-
-def _press_escape(widget) -> None:
-    event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Escape,
-                      Qt.KeyboardModifier.NoModifier)
-    widget.keyPressEvent(event)
-
-
-class TestPickerWindowContract:
-    def test_non_modal_tool_window(self, picker):
-        assert picker.isModal() is False
-        assert picker.windowFlags() & Qt.WindowType.Tool
-
-    def test_set_methods_forwards_to_browser(self, picker):
-        assert len(picker._browser._methods) == 2
-        assert picker._count_label.text() == '2 个方法'
-        assert picker._close_btn.toolTip() == '关闭（Esc）'
-        assert picker._add_selected_btn.text() == '添加'
-        assert picker.minimumWidth() >= 480
-
-    def test_reset_state_clears_search(self, picker):
-        picker._browser._search.setText('agc')
-        assert picker._browser._search.text() == 'agc'
-        picker.reset_state()
-        assert picker._browser._search.text() == ''
-        # 过滤复位：全部分类重新可见
-        assert picker._browser._tree.topLevelItemCount() == 2
-
-    def test_search_filters_tree_in_realtime(self, picker, qapp):
-        """搜索框输入实时过滤分类树（PRD A2③）：method_id 命中 + 显示名
-        命中 + 清空恢复全量。"""
-        tree = picker._browser._tree
-        top_filter = tree.topLevelItem(0)     # 滤波（dewow）
-        top_gain = tree.topLevelItem(1)       # 增益（agc）
-        picker._browser._search.setText('agc')
-        qapp.processEvents()
-        assert top_gain.isHidden() is False
-
-        assert top_gain.child(0).isHidden() is False
-        assert top_filter.isHidden() is True    # dewow 不命中 → 整类隐藏
-        # 显示名（中文）命中路径
-        picker._browser._search.setText('去直')
-        qapp.processEvents()
-        assert top_filter.isHidden() is False
-        assert top_filter.child(0).isHidden() is False
-        assert top_gain.isHidden() is True
-        # 清空 → 全量恢复
-        picker._browser._search.setText('')
-        qapp.processEvents()
-        assert top_filter.isHidden() is False
-        assert top_gain.isHidden() is False
-
-    def test_search_expands_matches_and_restores_collapsed_categories(self, picker):
-        tree = picker._browser._tree
-        gain = tree.topLevelItem(1)
-        gain.setExpanded(False)
-        picker._browser._search.setText('agc')
-        assert gain.isExpanded()
-        assert picker._count_label.text() == '1 个匹配'
-        picker._browser._search.clear()
-        assert not gain.isExpanded()
-        assert picker._count_label.text() == '2 个方法'
-
-    def test_show_event_resets_search(self, picker, qapp):
-        picker.show()
-        qapp.processEvents()
-        picker._browser._search.setText('agc')
-        picker.hide()
-        picker.show()          # 再开 = 状态复位
-        qapp.processEvents()
-        assert picker._browser._search.text() == ''
-
-    def test_escape_closes(self, picker, qapp):
-        picker.show()
-        qapp.processEvents()
-        assert picker.isVisible()
-        _press_escape(picker)
-        assert not picker.isVisible()
-
-    def test_focus_recheck_closes_when_focus_left(self, picker, qapp,
-                                                  monkeypatch):
-        """offscreen 下 focusWidget 非本窗后代 → 复核关闭（真机补点外部）。"""
-        picker.show()
-        qapp.processEvents()
-        assert picker.isVisible()
-        # offscreen 的 show 可能把焦点指派给窗内控件——这里钉的是
-        # 「焦点在本窗之外必关」的契约，与平台焦点策略无关
-        monkeypatch.setattr(QApplication, 'focusWidget',
-                            classmethod(lambda cls: None))
-        picker._close_if_focus_left()
-        assert not picker.isVisible()
-
-    def test_focus_recheck_keeps_open_when_focus_inside(self, picker, qapp, monkeypatch):
-        picker.show()
-        qapp.processEvents()
-        # Test the focus-membership rule, as for the outside-focus case above.
-        # Native focus transfer is not deterministic under Qt offscreen.
-        monkeypatch.setattr(QApplication, 'focusWidget',
-                            classmethod(lambda cls: picker._browser._search))
-        picker._close_if_focus_left()
-        assert picker.isVisible()
-
-
-class TestPickerChooseFlow:
-    def test_double_click_emits_and_stays_open(self, picker, qapp):
-        """双击 → sig_method_chosen；不关窗，可连续添加（PRD Q1 定案）。"""
-        got = []
-        picker.sig_method_chosen.connect(got.append)
-        picker.show()
-        qapp.processEvents()
-        # 等价双击路径：浏览器双击发 sig_add_requested → 弹窗转发
-        picker._browser.sig_add_requested.emit('dewow')
-        assert got == ['dewow']
-        assert picker.isVisible()
-        picker._browser.sig_add_requested.emit('agc')
-        assert got == ['dewow', 'agc']
-        assert picker.isVisible()
-
-    def test_empty_method_id_ignored(self, picker):
-        got = []
-        picker.sig_method_chosen.connect(got.append)
-        picker._browser.sig_add_requested.emit('')
-        assert got == []
-
-    def test_selection_updates_details_and_primary_action(self, picker, qapp):
-        got = []
-        picker.sig_method_chosen.connect(got.append)
-        assert picker._add_selected_btn.isEnabled() is False
-        picker.show()
-        qapp.processEvents()
-        item = picker._browser._tree.topLevelItem(0).child(0)
-        picker._browser._tree.setCurrentItem(item)
-        qapp.processEvents()
-        assert picker._selected_name_label.text() == '去直流滤波'
-        assert picker._add_selected_btn.isEnabled() is True
-        picker._add_selected_btn.click()
-        assert got == ['dewow']
-        assert picker.isVisible()
-
-    def test_enter_motion_uses_small_offset(self, picker, qapp, monkeypatch):
-        from ui import motion
-
-        monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
-        picker.show()
-        qapp.processEvents()
-        animation = picker._geometry_animation
-        assert animation.duration() == 180
-        assert abs(animation.endValue().y() - animation.startValue().y()) == 8
-
-    def test_apply_theme_is_idempotent(self, picker):
-        """主窗 findChildren 遍历可能命中隐藏弹窗：纯令牌重刷无副作用。"""
-        picker.apply_theme(True)
-        picker.apply_theme(False)
-        picker.apply_theme(True)
-
-
-# ============================================================ 页面接线
-class TestPagePickerWiring:
-    @staticmethod
-    def _page(qapp):
-        from ui.pages.processing_page import ProcessingPage
-
-        page = ProcessingPage()
-        page.set_methods(_methods())
-        return page
-
-    def test_plus_opens_picker_singleton(self, qapp):
-        """「+」→ 选择器；再点「+」= 唤起同一实例（防堆叠）；关窗后引用释放。"""
-        page = self._page(qapp)
-        try:
-            assert page._method_picker is None
-            page._open_method_picker()
-            first = page._method_picker
-            assert first is not None
-            assert first.isVisible()
-            first._browser._search.setText('agc')
-            page._open_method_picker()          # 再点：同一实例 + 状态复位
-            assert page._method_picker is first
-            assert first._browser._search.text() == ''
-            first.close()                        # 任何路径关闭 → 引用置 None
-            assert page._method_picker is None
-        finally:
-            page.close()
-
-    def test_add_button_reopens_fresh_picker_after_escape(self, qapp):
-        """Retired chain-strip + is replaced by the workbench add button."""
-        page = self._page(qapp)
-        try:
-            page._add_method_btn.click()
-            first = page._method_picker
-            first._browser.sig_add_requested.emit('dewow')
-            _press_escape(first)
-            assert page._method_picker is None
-            page._add_method_btn.click()
-            assert page._method_picker is not first
-            assert page._method_picker._browser._search.text() == ''
-            page._method_picker._browser.sig_add_requested.emit('agc')
-            assert [s['method_id'] for s in page._pipeline_list.steps()] == ['dewow', 'agc']
-        finally:
-            page.close()
-
-    def test_add_method_button_opens_same_picker(self, qapp):
-        page = self._page(qapp)
-        try:
-            page._add_method_btn.click()
-            assert page._method_picker is not None
-            page._method_picker.close()
-            assert page._method_picker is None
-        finally:
-            page.close()
-
-    def test_replace_picker_reused_by_add_button_returns_to_append(self, qapp):
-        """Button reuses the live picker but switches its intent to append."""
-        page = self._page(qapp)
-        try:
-            page._add_method_to_pipeline('dewow')
-            page._open_method_picker(purpose='replace', index=0)
-            first = page._method_picker
-            page._add_method_btn.click()
-            assert page._method_picker is first
-            first._browser.sig_add_requested.emit('agc')
-            assert [s['method_id'] for s in page._pipeline_list.steps()] == ['dewow', 'agc']
-            assert first.isVisible()
-        finally:
-            page.close()
-
-    def test_double_click_appends_to_chain(self, qapp):
-        page = self._page(qapp)
-        try:
-            page._open_method_picker()
-            page._method_picker._browser.sig_add_requested.emit('dewow')
-            page._method_picker._browser.sig_add_requested.emit('agc')
-            steps = page._pipeline_list.steps()
-            assert [s['method_id'] for s in steps] == ['dewow', 'agc']
-            # 选择器保持打开，可继续添加
-            assert page._method_picker.isVisible()
-        finally:
-            page.close()
-
-    def test_no_double_click_no_step(self, qapp):
-        """未双击任何条目前不向链尾添加（G1：消除「复制上一个」错觉）。"""
-        page = self._page(qapp)
-        try:
-            page._open_method_picker()
-            assert page._pipeline_list.steps() == []
-        finally:
-            page.close()
-
-    def test_set_methods_syncs_live_picker(self, qapp):
-        page = self._page(qapp)
-        try:
-            page._open_method_picker()
-            page.set_methods(_methods() + [{
-                'method_id': 'bp', 'name': 'bp', 'display_name': '带通滤波',
-                'category': 'filter', 'category_label': '滤波', 'tags': [],
-                'parameter_schema': []}])
-            assert len(page._method_picker._browser._methods) == 3
-        finally:
-            page.close()
-
-    def test_replace_purpose_dispatch(self, qapp):
-        """replace 分流：双击选择器 → _replace_step_method（T03 消费端）。"""
-        page = self._page(qapp)
-        try:
-            page._add_method_to_pipeline('dewow')
-            done: list = []
-            page._replace_step_method = lambda i, m: done.append((i, m))
-            page._open_method_picker(purpose='replace', index=0)
-            page._method_picker._browser.sig_add_requested.emit('agc')
-            assert done == [(0, 'agc')]
-        finally:
-            page.close()
-
-
-
-def test_details_open_only_on_demand(picker, qapp):
-    item = picker._browser._tree.topLevelItem(0).child(0)
-    picker._browser._tree.setCurrentItem(item)
+def page(qapp):
+    value = ProcessingPage()
+    value.set_line_label('L01')
+    value.set_original_bundle(bundle())
+    methods = _methods()
+    methods[0]['parameter_schema'] = [
+        {'name': 'window', 'label': '窗口', 'type': 'int', 'default': 5, 'min': 1, 'max': 100},
+    ]
+    value.set_methods(methods)
+    value.resize(1100, 720)
+    value.show()
+    value.activateWindow()
     qapp.processEvents()
-    assert picker._description_label.isHidden()
-    picker._details_btn.click()
-    assert picker._description_label.isVisibleTo(picker)
-    picker.reset_state()
-    assert picker._description_label.isHidden()
+    yield value
+    value.close()
+    value.deleteLater()
 
 
-def test_enter_adds_current_method(picker, qapp):
-    got = []
-    picker.sig_method_chosen.connect(got.append)
-    picker.show()
-    item = picker._browser._tree.topLevelItem(0).child(0)
-    picker._browser._tree.setCurrentItem(item)
+@pytest.mark.parametrize('search', ['agc', '无匹配'])
+def test_filter_clears_selection_and_rejects_hidden_method(page, search):
+    page._open_method_picker()
+    browser = page._method_browser
+    browser.select_method('dewow')
+    assert page._commit_step_btn.isEnabled()
+    browser._search.setText(search)
+    assert browser.current_method_id() is None
+    assert not page._commit_step_btn.isEnabled()
+    page._commit_step_form()
+    browser.sig_add_requested.emit('dewow')
+    assert page.current_pipeline()['steps'] == []
+    browser._search.clear()
+    assert browser.current_method_id() is None
+
+
+def test_search_matches_names_and_restores_category_expansion(page):
+    page._open_method_picker()
+    browser = page._method_browser
+    tree = browser._tree
+    filter_group, gain_group = (tree.topLevelItem(i) for i in range(2))
+    assert filter_group.isExpanded() and not gain_group.isExpanded()
+    browser._search.setText('AGC')
+    assert filter_group.isHidden() and not gain_group.isHidden() and gain_group.isExpanded()
+    browser._search.setText('去直')
+    assert not filter_group.isHidden() and gain_group.isHidden()
+    browser._search.clear()
+    assert filter_group.isExpanded() and not gain_group.isExpanded()
+
+
+def test_inline_library_keeps_search_after_configured_add_and_default_enter(page, qapp):
+    page._tools_btn.setChecked(False)
+    page._chain_strip.add_button().click()
+    browser = page._method_browser
+    assert browser.window() is page and browser.isVisibleTo(page)
+    assert page._tools_panel.currentWidget() is page._chain_scroll
+    browser._search.setText('dewow')
+    browser.select_method('dewow')
+    page._param_form._editors['window'].setValue(23)
+    page._commit_step_btn.click()
+    assert browser.isVisibleTo(page)
+    assert browser._search.text() == 'dewow'
+    assert page._selected_step == 0
+    assert page.current_pipeline()['steps'][0]['params'] == {'window': 23}
+    browser._tree.setFocus()
     qapp.processEvents()
-    event = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Return,
-                      Qt.KeyboardModifier.NoModifier)
-    picker.keyPressEvent(event)
-    assert got == ['dewow']
-    assert picker.isVisible()
+    QTest.keyClick(browser._tree, Qt.Key.Key_Return)
+    assert [step['params'] for step in page.current_pipeline()['steps']] == [{'window': 23}, {'window': 5}]
+    assert page._selected_step == 1 and browser.isVisibleTo(page)
+    QTest.keyClick(browser._tree, Qt.Key.Key_Escape)
+    assert browser.isHidden()
+    assert page._editor_uid == page._pipeline_list.step_uid(1)
 
 
-def test_anchor_popup_stays_inside_available_screen(qapp):
-    from PyQt6.QtWidgets import QWidget
+def test_add_requires_active_writable_input(qapp):
+    page = ProcessingPage()
+    try:
+        assert not page._chain_strip.add_button().isEnabled()
+        page._open_method_picker()
+        assert page._method_browser.isHidden()
+        page.set_line_label('L01')
+        page.set_original_bundle(bundle())
+        page.set_project_read_only(True)
+        assert not page._chain_strip.add_button().isEnabled()
+        page._open_method_picker()
+        assert page._method_browser.isHidden()
+    finally:
+        page.close()
+        page.deleteLater()
 
-    anchor = QWidget()
-    anchor.resize(40, 36)
-    available = anchor.screen().availableGeometry()
-    anchor.move(available.right() - 40, available.bottom() - 36)
-    anchor.show()
-    picker = MethodPickerDialog(anchor=anchor)
-    picker.set_methods(_methods())
-    picker._position_near_anchor()
-    assert available.contains(picker.geometry())
-    picker.close()
-    picker.deleteLater()
-    anchor.close()
-    anchor.deleteLater()
+
+def test_refresh_live_library_preserves_filter_but_clears_removed_selection(page):
+    page._open_method_picker()
+    browser = page._method_browser
+    browser._search.setText('dewow')
+    browser.select_method('dewow')
+    page.set_methods(_methods()[1:])
+    assert browser._search.text() == 'dewow'
+    assert browser.current_method_id() is None
+    assert not page._commit_step_btn.isEnabled()
+    assert page._param_form.isHidden()

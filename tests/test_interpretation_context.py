@@ -46,7 +46,7 @@ def test_switch_line_closes_session_and_clears_annotation_context():
     co.interpretation_controller.close_session.assert_called_once_with()
     page = views['interpretationInterface']
     page.set_session_active.assert_called_once_with(False)
-    page.set_session_info.assert_called_once_with('未打开会话')
+    page.set_session_info.assert_called_once_with('')
     page.set_points.assert_called_once_with([])
     page.set_bundle.assert_called_once_with(None)
     page.set_artifacts.assert_called_once_with([])

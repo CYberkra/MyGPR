@@ -157,6 +157,13 @@ NATIVE_ALGORITHMS: dict[str, NativeAlgorithm] = {
         parameter_schema=_schema(trace_start={"type": "int", "default": 1, "min": 1}, trace_end={"type": "int", "default": 0, "min": 0}),
         memory_multiplier=2.0, temporary_multiplier=1.0, relative_cost="low",
     ),
+    "trace_range_select": NativeAlgorithm(
+        "trace_range_select", "Event interval selection", "preprocess",
+        _lazy(f"{_ALG}.extended.trace_range_select", "native_trace_range_select"), "loaded_global",
+        parameter_schema=_schema(mode={"type": "str", "default": "keep", "choices": ("keep", "exclude")},
+                                 ranges={"type": "ranges", "default": []}),
+        memory_multiplier=2.0, temporary_multiplier=1.0, relative_cost="low",
+    ),
     "trace_qc": NativeAlgorithm(
         "trace_qc", "Trace quality control", "preprocess", _lazy(f"{_ALG}.extended", "native_trace_qc"), "loaded_global",
         implementation_version="native-extended-1.0",
@@ -482,6 +489,7 @@ AXIS_TRANSFORM_BY_METHOD = {
     "non_local_means": "identity",
     "time_cut": "sample_crop",
     "trace_cut": "trace_crop",
+    "trace_range_select": "trace_crop",
     "trace_qc": "trace_crop",
     "short_trace_repair": "identity",
     "energy_decay_gain": "identity",

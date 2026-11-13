@@ -65,29 +65,27 @@ class TestFriendlyErrorMessage:
         exc = KeyError("Unable to synchronously open object "
                        "(bad version number for layout message)")
         text = friendly_error_message(exc)
-        assert "数据文件损坏" in text
-        assert "原始 CSV 重新导入" in text
+        assert "无法读取数据文件" in text
+        assert "重新导入原采集文件" in text
 
     def test_hdf5_corrupt_file_signature(self):
         text = friendly_error_message(OSError("file signature not found"))
-        assert "数据文件损坏" in text
+        assert "无法读取数据文件" in text
 
     def test_hdf5_corrupt_truncated(self):
         text = friendly_error_message(OSError("truncated file: eof = 0, sblock = 1"))
-        assert "数据文件损坏" in text
+        assert "无法读取数据文件" in text
 
     def test_unrelated_english_message_untouched(self):
         # 非 HDF5 签名、非占用类异常保持原样
         assert friendly_error_message(ValueError("boom")) == "boom"
 
-    def test_permission_error_maps_to_file_in_use(self):
-        # R2: Windows os.replace 发布窗口被预览句柄占用 → PermissionError
+    def test_permission_error_with_no_sharing_violation_uses_permission_message(self):
         exc = PermissionError("[WinError 5] 拒绝访问。: 'a.h5' -> 'b.h5'")
         text = friendly_error_message(exc)
-        assert "文件被占用" in text
-        assert "重试" in text
+        assert "没有权限" in text
 
     def test_file_in_use_english_oserror_maps(self):
         text = friendly_error_message(OSError(
             "Unable to open file (file being used by another process)"))
-        assert "文件被占用" in text
+        assert "文件正在使用" in text

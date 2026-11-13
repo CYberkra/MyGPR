@@ -9,15 +9,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
-# gis_map_export 顶层拉入 matplotlib（实测 ~0.5s），仅报告出图需要，
-# 改为 _write_report_figures 内函数级导入，避免进入 GUI 启动导入链。
 from core.plot_font_policy import configure_matplotlib_cjk_fonts
 from core.report_export_rows import _sha256_file
+from core.tabular_security import safe_tabular_value
+from mygpr.domain.reporting.models import ANALYSIS_FIELDS
 
 _LOGGER = logging.getLogger(__name__)
-from core.tabular_security import safe_tabular_value
+
 
 def _write_xlsx_report(
     path: Path,
@@ -42,11 +40,13 @@ def _write_xlsx_report(
     overview["A1"].alignment = Alignment(horizontal="center")
     for key, label in [
         ("name", "项目名称"), ("project_no", "项目编号"), ("location", "测区位置"),
-        ("operator", "编制/操作员"), ("reviewer", "复核人"), ("approver", "批准人"),
+        ("operator", "编制/操作员"), ("reviewer", "审核人"), ("approver", "批准人"),
         ("device_model", "设备型号"), ("coordinate_system", "坐标系统"),
         ("vertical_datum", "高程基准"), ("generated_at", "生成时间"),
     ]:
         value = summary.get("generated_at", "") if key == "generated_at" else project.get(key, "")
+        if key in ('reviewer', 'approver') and not value:
+            continue
         overview.append([label, safe_tabular_value(value)])
     overview.column_dimensions["A"].width = 22
     overview.column_dimensions["B"].width = 72
@@ -84,75 +84,6 @@ def _write_xlsx_report(
     wb.save(tmp)
     tmp.replace(path)
 
-def _write_report_figures(store: Any, figures_dir: Path, *, line_ids: set[str] | None = None, include_plan_map: bool = True, cancel_checker=None, progress_callback=None) -> list[Path]:
-    import matplotlib
-    matplotlib.use("Agg")   # 无头交付：绘图不拉入 Qt backend（Qt-import 隔离红线）
-    import matplotlib.pyplot as plt
-    figures_dir.mkdir(parents=True, exist_ok=True)
-    outputs: list[Path] = []
-    lines = [line for line in store.list_lines() if line_ids is None or line.line_id in line_ids]
-
-    # Rebuild the plan map from registered GIS/trajectory/interface data instead
-    # of exporting the interactive Qt preview or a trajectory-only sketch.
-    plan_path = figures_dir / "project_plan_map.png"
-    try:
-        if not include_plan_map:
-            raise LookupError("plan map excluded by report profile")
-        from core.gis_map_export import export_project_plan_map
-
-        export_project_plan_map(
-            store,
-            plan_path,
-            cancel_requested=cancel_checker,
-            progress_callback=(
-                (lambda current, total, message: progress_callback(current, max(total, 1), message))
-                if progress_callback is not None else None
-            ),
-            dpi=180,
-        )
-        outputs.append(plan_path)
-    except Exception as exc:
-        from core.job_manager import JobCancelled
-        if isinstance(exc, JobCancelled):
-            raise
-        if isinstance(exc, LookupError):
-            pass
-        else:
-            # Projects without real spatial coordinates may still produce valid
-            # B-scan/interface figures and a formal report with an explicit gap.
-            store.append_log(f"报告 GIS 平面图未生成: {exc}")
-
-    for index, line in enumerate(lines, start=1):
-        if cancel_checker is not None and cancel_checker():
-            from core.job_manager import JobCancelled
-            raise JobCancelled("报告图件生成已取消")
-        try:
-            dataset=store.load_gpr_dataset(line.line_id)
-        except Exception:
-            continue
-        matrix=dataset.normalized_preview(max_samples=900,max_traces=1800)
-        row_step=max(1,int(np.ceil(dataset.sample_count/matrix.shape[0]))); col_step=max(1,int(np.ceil(dataset.trace_count/matrix.shape[1])))
-        distance=np.asarray(dataset.distance_axis_m[::col_step][:matrix.shape[1]]); depth=np.asarray(dataset.depth_axis_m[::row_step][:matrix.shape[0]])
-        configure_matplotlib_cjk_fonts()
-        fig,ax=plt.subplots(figsize=(10.5,4.2),dpi=150)
-        ax.imshow(matrix,cmap="gray",aspect="auto",origin="upper",extent=[float(distance[0]),float(distance[-1]),float(depth[-1]),float(depth[0])],vmin=-1,vmax=1)
-        try:
-            ann=store.load_basal_interface_annotation(line.line_id)
-            if ann is not None:
-                curve=ann.curve_samples(); finite=np.isfinite(curve)
-                if finite.any():
-                    y=np.interp(curve[finite],np.arange(dataset.sample_count),dataset.depth_axis_m)
-                    ax.plot(np.asarray(dataset.distance_axis_m)[finite],y,linewidth=1.7,label="基覆界面")
-                    ax.legend(fontsize=8)
-        except Exception:  # noqa: BLE001 - 注解缺失时图件继续生成，仅告警
-            _LOGGER.warning("基覆界面注解加载失败（图件继续生成）：%s", line.line_id)
-        ax.set_title(f"{line.line_id} 原始 B-scan 与基覆界面")
-        ax.set_xlabel("距离 (m)"); ax.set_ylabel("深度 (m)")
-        out=figures_dir/f"{line.line_id}_basal_interface.png"; fig.tight_layout(); fig.savefig(out,bbox_inches="tight"); plt.close(fig); outputs.append(out)
-        if progress_callback is not None:
-            progress_callback(index, max(len(lines),1), f"生成图件 {line.line_id}")
-    return outputs
-
 def _write_checksums(package_dir: Path, path: Path, *, cancel_checker=None) -> list[dict[str, Any]]:
     rows=[]
     for file in sorted(p for p in package_dir.rglob("*") if p.is_file() and p != path):
@@ -165,76 +96,357 @@ def _write_checksums(package_dir: Path, path: Path, *, cancel_checker=None) -> l
     path.write_text(text,encoding="utf-8")
     return rows
 
-def _write_html_report(path: Path, *, summary: dict[str, Any], lines: list[dict[str, Any]], quality: list[dict[str, Any]], interfaces: list[dict[str, Any]], targets: list[dict[str, Any]], artifacts: list[dict[str, Any]], spatial: list[dict[str, Any]], sensor_sync: list[dict[str, Any]] | None = None, gis_layers: list[dict[str, Any]] | None = None, boreholes: list[dict[str, Any]] | None = None, figure_paths: list[Path] | None = None) -> None:
-    def table(headers: list[str], rows: list[dict[str, Any]], limit: int = 30) -> str:
-        head = "".join(f"<th>{html.escape(h)}</th>" for h in headers)
-        body_rows = []
-        for row in rows[:limit]:
-            body_rows.append("<tr>" + "".join(f"<td>{html.escape(str(row.get(h, '')))}</td>" for h in headers) + "</tr>")
-        if not body_rows:
-            body_rows.append(f"<tr><td colspan='{len(headers)}'>无记录</td></tr>")
-        return f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(body_rows)}</tbody></table>"
+_BOREHOLE_COLUMNS = ['borehole_id', 'line_id', 'trace_index', 'borehole_depth_m', 'interpreted_depth_m', 'error_m', 'status']
+_REPORT_SIGNERS = (('编制', 'compiler'), ('审核', 'reviewer'), ('批准', 'approver'))
+_REPORT_HEADERS = {
+    'line_id': '测线号', 'name': '名称', 'length_m': '长度（m）', 'data_quality': '数据质检',
+    'rtk_status': 'RTK 状态', 'processing_status': '处理状态', 'status': '状态',
+    'sample_count': '采样点数', 'trace_count': '道数', 'orientation_message': '道序说明',
+    'rtk_coverage_ratio': 'RTK 覆盖率', 'rtk_fixed_ratio': 'RTK 固定解占比',
+    'imu_coverage_ratio': 'IMU 覆盖率', 'gap_count': '缺口数', 'warning_count': '警告数',
+    'artifact_id': '成果编号', 'method_name': '处理方法', 'input_shape': '输入尺寸（采样点 × 道数）',
+    'output_shape': '输出尺寸（采样点 × 道数）', 'version': '版本', 'keypoint_count': '标注点数',
+    'coverage_ratio': '覆盖率', 'spatial_csv_path': '空间成果文件', 'row_count': '记录数',
+    'has_xy_count': '有坐标的记录数', 'kind': '类型', 'role': '用途', 'crs': '坐标参考',
+    'geometry_type': '几何类型', 'borehole_id': '钻孔编号', 'trace_index': '道索引',
+    'borehole_depth_m': '钻孔深度（m）', 'interpreted_depth_m': '解释深度（m）',
+    'error_m': '误差（m）', 'target_id': '目标编号', 'distance_m': '沿线距离（m）',
+    'depth_m': '深度（m）', 'type': '类型',
+}
+_LINE_PARAMETERS = ('设备', '天线', '频段／中心频率', '功率', '时窗', '采样点／道数')
 
-    project = summary.get("project", {})
-    metrics = summary.get("metrics", {})
-    sensor_sync = sensor_sync or []
-    gis_layers = gis_layers or []
-    boreholes = boreholes or []
-    figure_paths = figure_paths or []
-    generated_at = summary.get("generated_at", "")
-    snapshot = dict(summary.get("snapshot") or {})
-    source_binding = dict(summary.get("source_binding") or {})
-    lifecycle = dict(summary.get("lifecycle") or {})
+
+def _report_sections(lines, quality, interfaces, targets, artifacts, spatial,
+                     sensor_sync, gis_layers, boreholes, marker_rows):
+    return (
+        ("测线台账", ["line_id", "name", "length_m", "data_quality", "rtk_status", "processing_status"], lines),
+        ("数据质检", ["line_id", "status", "sample_count", "trace_count", "orientation_message"], quality),
+        ("传感器同步", ["line_id", "status", "rtk_coverage_ratio", "rtk_fixed_ratio", "imu_coverage_ratio", "gap_count", "warning_count"], sensor_sync),
+        ("处理记录", ["artifact_id", "line_id", "method_name", "status", "input_shape", "output_shape"], artifacts),
+        ("界面解释", ["line_id", "status", "version", "keypoint_count", "coverage_ratio"], interfaces),
+        ("空间成果", ["line_id", "spatial_csv_path", "row_count", "has_xy_count"], spatial),
+        ("GIS 图层", ["name", "kind", "role", "crs", "geometry_type"], gis_layers),
+        ('钻孔对比', _BOREHOLE_COLUMNS, boreholes),
+        ("历史点目标", ["target_id", "line_id", "distance_m", "depth_m", "type", "status"], targets),
+        ("标记与事件区间", ["测线", "图件编号", "名称", "用途", "道号范围", "数据版本", "信息来源", "状态"], marker_rows),
+        ("事件采集时段", ["图件编号", "开始采集时间（UTC）", "结束采集时间（UTC）"],
+         [row for row in marker_rows if row.get("开始采集时间（UTC）") or row.get("结束采集时间（UTC）")]),
+    )
+
+
+def _step_text(dossier):
+    result = []
+    for run in dossier['processing']:
+        for step in run['steps']:
+            if not step.get('enabled', True):
+                continue
+            params = step.get('params') or {}
+            name = step.get('label') or step.get('method_id') or '处理'
+            compact = {key: value for key, value in params.items()
+                       if isinstance(value, (str, int, float, bool)) and not key.startswith('_')}
+            values = ' · '.join(f'{key}={value}' for key, value in compact.items())
+            result.append(f'{name} · {values}' if values else name)
+        selection = run.get('selection')
+        if selection:
+            mode = '保留' if selection['mode'] == 'keep' else '剔除'
+            ranges = ', '.join(f'{a + 1}–{b}' for a, b in selection.get('ranges', ())[:8])
+            more = ' 等' if len(selection.get('ranges', ())) > 8 else ''
+            source = selection.get('input_artifact_id') or '原始数据'
+            result.append(f'{mode} · 输入 {source} · {ranges}{more} 道 · 选中 {selection["affected_count"]} 道 · 输出 {selection["output_count"]} 道')
+            for event in selection.get('intervals', ()):
+                label = ' · '.join(filter(None, (event.get('report_code'), event.get('name') or event['uid'])))
+                result.append(f'{label} · 区间修订 {event.get("revision", "—")}')
+        result.extend(str(warning) for warning in run['warnings'])
+    return result
+
+
+def _event_text(event):
+    parts = [event['position'], event['purpose'], event['evidence']]
+    if event.get('time_start') or event.get('time_end'):
+        parts.append(f'{event["time_start"] or "开放"} 至 {event["time_end"] or "开放"}（UTC）')
+    if event.get('note'):
+        parts.append(event['note'])
+    return ' · '.join(part for part in parts if part)
+
+
+def _ordered_dossiers(summary):
+    dossiers = summary.get('line_dossiers', [])
+    featured = [item for item in dossiers if item['featured']]
+    if not featured and dossiers:
+        featured = sorted(dossiers, key=lambda item: (
+            not any(item['analysis'].values()),
+            item['quality'].get('status') not in ('失败', '警告'),
+        ))[:min(len(dossiers), 3)]
+    identifiers = {item['line_id'] for item in featured}
+    return featured, [item for item in dossiers if item['line_id'] not in identifiers]
+
+
+def _html_esc(value):
+    return html.escape('' if value is None else str(value))
+
+
+def _html_table(headers, rows):
+    head = ''.join(f'<th>{_html_esc(_REPORT_HEADERS.get(key, key))}</th>' for key in headers)
+    body = ''.join('<tr>' + ''.join(f'<td>{_html_esc(row.get(key))}</td>' for key in headers) + '</tr>' for row in rows)
+    return f'<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+
+
+def _html_figure(name, label, *, caption=True):
+    if not name:
+        return ''
+    text = f'<figcaption>{_html_esc(label)}</figcaption>' if caption else ''
+    return f'<figure><img alt="{_html_esc(label)}" src="../figures/{_html_esc(name)}">{text}</figure>'
+
+
+def _html_paragraph(label, value):
+    return f'<h3>{_html_esc(label)}</h3><p>{_html_esc(value)}</p>' if value else ''
+
+
+def _html_dossier(item, summary):
+    qc = item['quality']
+    analysis = item['analysis']
+    uid = _html_esc(item['line_id'])
+    location = (f'{analysis["code"]} · 原始第 {analysis["first_trace"]}–{analysis["last_trace"]} 道'
+                if analysis.get('code') else '')
+    descriptions = ''.join(_html_paragraph(label, analysis.get(key)) for key, label in ANALYSIS_FIELDS.items())
+    events = ''.join(f'<dt>{_html_esc(event["code"])} · {_html_esc(event["name"])}</dt><dd>{_html_esc(_event_text(event))}</dd>'
+                     for event in item['events'])
+    steps = ''.join(f'<li>{_html_esc(value)}</li>' for value in _step_text(item))
+    notes = ''.join(f'<li>{_html_esc(note)}</li>' for note in item['figure_notes'])
+    details = ''.join(_html_figure(name, location) for name in item['detail_figures'])
+    notice = ' · '.join(filter(None, (qc.get('status'), qc.get('orientation_message')))) if (
+        qc.get('status') in ('失败', '警告')) else ''
+    parameters = ''.join(f'<dt>{_html_esc(key)}</dt><dd>{_html_esc(value)}</dd>'
+                         for key, value in item['acquisition'].items() if value)
+    route = _html_figure(item.get('route_figure'), f'{item["line_id"]} 路线', caption=False)
+    if not route and item['map_status'] == '无法在地图定位':
+        reason = summary.get('plan_map_note') if len(summary['line_dossiers']) == 1 else ''
+        route = f'<p class="meta">{_html_esc(reason or "缺少可用的定位轨迹")}</p>'
+    elif not route and item['map_status'] == '已绘制轨迹':
+        route = '<p><a href="#survey-map">查看测区路线总图</a></p>'
+    return (
+        f'<section id="{uid}"><h3>{uid} · {_html_esc(item["name"])}</h3>'
+        + (f'<p class="meta">{_html_esc(notice)}</p>' if notice else '')
+        + f'<div class="line-header">{route}<dl class="parameters">{parameters}</dl></div>'
+        + _html_figure(item['raw_figure'], '原始 B-scan', caption=False)
+        + _html_figure(item['processed_figure'], f"处理后 B-scan · {item['primary_name']}", caption=False)
+        + ('<p class="meta">仅原始剖面</p>' if item['raw_figure'] and not item['primary_artifact_id'] else '')
+        + (f'<ul class="meta">{notes}</ul>' if notes else '')
+        + '<h4>分析说明</h4>' + (f'<p>{_html_esc(location)}</p>' if location else '')
+        + (descriptions or '<p class="meta">未填写</p>')
+        + details + (f'<p class="meta">{_html_esc(item["detail_note"])}</p>' if item['detail_note'] else '')
+        + (f'<dl>{events}</dl>' if events else '')
+        + (f'<details><summary>处理步骤</summary><ol>{steps}</ol></details>' if steps else '')
+        + '</section>'
+    )
+
+
+def _write_html_report(path: Path, *, summary, lines, quality, interfaces, targets, artifacts,
+                       spatial, sensor_sync=(), gis_layers=(), boreholes=()):
+    project = summary['project']
+    signers = '　'.join(f'{label} · {_html_esc(project[key])}' for label, key in _REPORT_SIGNERS if project.get(key))
+    narrative = summary['project_analysis']
+    focus, others = _ordered_dossiers(summary)
+    line_count = len(summary['line_dossiers'])
+    tables = _report_sections(lines, quality, interfaces, targets, artifacts, spatial,
+                              sensor_sync, gis_layers, boreholes, summary.get('marker_rows', []))
+    names = ' · '.join(f'<a href="#{_html_esc(item["line_id"])}">{_html_esc(item["line_id"])}</a>' for item in focus + others)
+    map_status = ', '.join(item['line_id'] for item in focus + others if item['map_status'] == '无法在地图定位')
+    show_plan = line_count > 1 and (summary['plan_map'] or map_status)
+    processing_link = (' · <a href="../json/processing_parameters.json">处理参数与版本</a>'
+                       if summary['files'].get('processing_parameters_json') else '')
     css = """
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 28px; color: #1f2937; }
-    h1 { margin-bottom: 4px; } h2 { margin-top: 28px; border-bottom: 1px solid #d1d5db; padding-bottom: 6px; }
-    .meta, .metric { color: #4b5563; } .metrics { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; }
-    .metric { border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; min-width: 130px; background: #f9fafb; }
-    .metric b { display: block; font-size: 22px; color: #111827; }
-    .approval { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; margin:18px 0; }
-    .approval div { border:1px solid #cbd5e1; min-height:72px; padding:10px; }
-    figure { margin:18px 0; page-break-inside:avoid; } figure img { max-width:100%; border:1px solid #d1d5db; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; font-size: 12px; }
-    th, td { border: 1px solid #d1d5db; padding: 6px 7px; vertical-align: top; }
-    th { background: #eef2ff; text-align: left; } code { background:#f3f4f6; padding:2px 4px; border-radius:4px; }
+    body{font:15px/1.55 system-ui,'Microsoft YaHei',sans-serif;margin:40px auto;padding:0 20px;max-width:1100px;color:#172336}
+    h1,h2,h3,h4{line-height:1.22} h2{margin-top:36px;border-bottom:1px solid #cbd5e1;padding-bottom:8px}
+    p,dd{white-space:pre-wrap;overflow-wrap:anywhere} .meta,figcaption{color:#475569;font-size:13px}
+    figure{margin:18px 0} img{width:100%;object-fit:contain} figcaption{margin-top:3px}
+    table{border-collapse:collapse;width:100%;font-size:12px} th,td{border-bottom:1px solid #cbd5e1;padding:6px;text-align:left}
+    th{background:#f1f5f9} .scroll{overflow:auto} section{margin:25px 0} dt{font-weight:600}
+    .line-header{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap;border-bottom:1px solid #cbd5e1}
+    .line-header figure{flex:1 1 280px;max-width:520px;margin:0}
+    .parameters{flex:1 1 260px;display:grid;grid-template-columns:max-content 1fr;gap:3px 12px;font-size:13px;margin:0 0 12px}
+    .parameters dd{margin:0}
     """
-    html_text = f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>{html.escape(project.get('name', 'MyGPR 项目报告'))}</title><style>{css}</style></head>
-<body>
-<h1>{html.escape(project.get('name', 'MyGPR 项目'))} 成果报告</h1>
-<div class="meta">生成时间：{html.escape(str(generated_at))}　项目编号：{html.escape(str(project.get('project_no', '--')))}　测区：{html.escape(str(project.get('location', '--')))}</div>
-<div class="meta">快照：{html.escape(str(snapshot.get('snapshot_id', '--')))}　项目修订：{html.escape(str(snapshot.get('project_revision', '--')))}　空间成果：{html.escape(str(source_binding.get('spatial_result_id', '未绑定') or '未绑定'))}　审签状态：{html.escape(str(lifecycle.get('approval_status', '工作草稿')))}</div>
-<div class="metrics">
-  <div class="metric"><b>{metrics.get('line_count', 0)}</b>测线</div>
-  <div class="metric"><b>{metrics.get('imported_line_count', 0)}</b>已导入测线</div>
-  <div class="metric"><b>{metrics.get('qc_passed_count', 0)}</b>质检通过</div>
-  <div class="metric"><b>{metrics.get('processing_artifact_count', 0)}</b>处理结果</div>
-  <div class="metric"><b>{metrics.get('interface_line_count', 0)}</b>界面标注测线</div>
-  <div class="metric"><b>{metrics.get('spatial_export_count', 0)}</b>空间成果</div>
-  <div class="metric"><b>{metrics.get('borehole_passed_count', 0)}/{metrics.get('borehole_comparison_count', 0)}</b>钻孔误差达标</div>
-</div>
-<h2>签署与版本</h2>
-<div class="approval"><div><b>编制</b><br>{html.escape(str(project.get('compiler') or project.get('operator') or '--'))}<br><br>签字/日期：</div><div><b>复核</b><br>{html.escape(str(project.get('reviewer') or '--'))}<br><br>签字/日期：</div><div><b>批准</b><br>{html.escape(str(project.get('approver') or '--'))}<br><br>签字/日期：</div></div>
-<h2>1. 项目概况</h2>
-<p>操作员：{html.escape(str(project.get('operator', '--')))}；设备：{html.escape(str(project.get('device_model', '--')))}；坐标系统：<code>{html.escape(str(project.get('coordinate_system', '--')))}</code>；高程基准：{html.escape(str(project.get('vertical_datum','--')))}。</p>
-<h2>2. 测线清单</h2>{table(['line_id','name','length_m','data_quality','rtk_status','sensor_sync_status','processing_status','target_count','data_format'], lines)}
-<h2>3. 数据质检</h2>{table(['line_id','line_name','status','sample_count','trace_count','length_m','orientation','orientation_message','issue_count'], quality)}
-<h2>4. 雷达—RTK—IMU 同步</h2>{table(['line_id','status','rtk_coverage_ratio','rtk_fixed_ratio','rtk_max_residual_s','imu_coverage_ratio','altimeter_coverage_ratio','gap_count','jump_count','warning_count'], sensor_sync)}
-<h2>5. 数据处理与可追溯</h2>{table(['artifact_id','line_id','method_id','method_name','role','status','input_shape','output_shape','output_data_sha256'], artifacts)}
-<h2>6. 基覆界面人工标注</h2>{table(['line_id','status','version','keypoint_count','coverage_ratio','judged_ratio','weak_ratio','ignore_ratio','no_interface_ratio','spatial_curve_path'], interfaces)}
-<h2>7. 空间成果与 GIS 图层</h2>{table(['line_id','spatial_csv_path','row_count','has_xy_count','empty_xy_count'], spatial)}
-{table(['name','kind','role','crs','geometry_type','is_dem','bounds','source_path'], gis_layers)}
-<h2>8. 钻孔对比</h2>{table(['borehole_id','line_id','trace_index','borehole_depth_m','interpreted_depth_m','error_m','absolute_error_m','threshold_m','status'], boreholes)}
-<h2>9. 工程图件</h2>{''.join(f'<figure><img src="../figures/{html.escape(p.name)}"><figcaption>{html.escape(p.stem)}</figcaption></figure>' for p in figure_paths)}
-<h2>附录 A：历史点目标兼容数据</h2>{table(['target_id','line_id','distance_m','depth_m','type','status'], targets)}
-<p class="meta">说明：正式成果以连续基覆界面曲线及其弱可见、忽略、无界面语义为准；历史点目标仅作兼容附录。</p>
+    output = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>{_html_esc(project['name'])}</title><style>{css}</style></head><body>
+<h1>{_html_esc(project['name'])} 成果报告</h1>
+<p class="meta">{_html_esc(project.get('project_no'))} · {_html_esc(project.get('location'))} · {_html_esc(summary.get('generated_at'))}</p>
+<h2>项目摘要</h2>
+{_html_paragraph('测量目的', narrative.get('objective'))}
+{_html_paragraph('主要发现', narrative.get('findings') or '未填写项目发现')}
+<p>{line_count} 条测线 · {names}</p>
+{'<h2 id="survey-map">测区路线总图</h2>' if show_plan else ''}
+{_html_figure(summary['plan_map'], '测区路线总图', caption=False) if show_plan else ''}
+{f'<p class="meta">无法在地图定位 · {_html_esc(map_status)}</p>' if show_plan and map_status else ''}
+{f'<p class="meta">{_html_esc(summary["plan_map_note"])}</p>' if show_plan and summary.get('plan_map_note') else ''}
+<h2>重点测线</h2>{''.join(_html_dossier(item, summary) for item in focus)}
+<h2>结论与验证</h2>
+<p>{_html_esc(narrative.get('conclusion') or '未填写项目结论')}</p>
+{_html_table(_BOREHOLE_COLUMNS, boreholes) if boreholes else ''}
+{'<h2>测线图册</h2>' if others else ''}{''.join(_html_dossier(item, summary) for item in others)}
+<h2>交付附件</h2>
+<p><a href="../tables/acquisition_parameters.csv">采集参数 CSV</a> ·
+<a href="../json/line_dossiers.json">逐线记录</a>{processing_link} ·
+<a href="../json/markers.csv">标记清单</a> · <a href="../checksums.sha256">文件校验</a></p>
+{''.join(f'<details><summary>{title}</summary><div class="scroll">{_html_table(cols, rows)}</div></details>' for title, cols, rows in tables if rows)}
+<h2>报告版本</h2>
+{f'<p>{signers}</p>' if signers else ''}
+<p class="meta">报告 {_html_esc(summary.get('report_revision'))} · 快照 {_html_esc(summary.get('snapshot', {}).get('snapshot_id'))}</p>
 </body></html>"""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    tmp.write_text(html_text, encoding="utf-8")
+    tmp.write_text(output, encoding="utf-8")
     tmp.replace(path)
 
-def _write_pdf_report(path: Path, *, summary: dict[str, Any], lines: list[dict[str, Any]], quality: list[dict[str, Any]], interfaces: list[dict[str, Any]], targets: list[dict[str, Any]], artifacts: list[dict[str, Any]], spatial: list[dict[str, Any]], sensor_sync: list[dict[str, Any]] | None = None, gis_layers: list[dict[str, Any]] | None = None, boreholes: list[dict[str, Any]] | None = None, figure_paths: list[Path] | None = None) -> None:
+
+def _pdf_wrap(value, width=73):
+    import unicodedata
+
+    rows = []
+    for paragraph in str(value or '').splitlines():
+        line, used = [], 0
+        for char in paragraph:
+            size = 2 if unicodedata.east_asian_width(char) in ('W', 'F') else 1
+            if used + size > width:
+                rows.append(''.join(line))
+                line, used = [], 0
+            line.append(char)
+            used += size
+        rows.append(''.join(line))
+    return rows
+
+
+def _draw_pdf_line_header(fig, item, summary, image, font_name):
+    route_name = item.get('route_figure')
+    if route_name:
+        image(fig, route_name, [.05, .735, .43, .185], anchor='N')
+    elif item['map_status'] != '未选空间章节':
+        route_status = '见测区路线总图'
+        if item['map_status'] == '无法在地图定位':
+            reason = summary.get('plan_map_note') if len(summary['line_dossiers']) == 1 else ''
+            route_status = reason or '缺少可用的定位轨迹'
+        for row, line in enumerate(_pdf_wrap(route_status, 38)):
+            fig.text(.07, .875 - .019 * row, line, fontname=font_name, fontsize=9, color='#475569')
+    parameter_x = .52 if route_name or item['map_status'] != '未选空间章节' else .07
+    for row, key in enumerate(_LINE_PARAMETERS):
+        value = item['acquisition'].get(key) or '未记录'
+        line = f'{key}  {value}'
+        short = _pdf_wrap(line, 48)
+        fig.text(parameter_x, .903 - .023 * row, short[0] + ('…' if len(short) > 1 else ''),
+                 fontname=font_name, fontsize=9, color='#334155')
+
+
+def _pdf_line_content(item, visible_notes, text_block):
+    content = []
+    analysis = item['analysis']
+    if analysis.get('code'):
+        text_block(content, '分析范围',
+                   f"{analysis['code']} · 原始第 {analysis['first_trace']}–{analysis['last_trace']} 道")
+    if item['detail_note']:
+        content.extend((False, row) for row in _pdf_wrap(item['detail_note']))
+    if any(analysis.get(key) for key in ANALYSIS_FIELDS):
+        for key, label in ANALYSIS_FIELDS.items():
+            text_block(content, label, analysis.get(key))
+    else:
+        text_block(content, '分析说明', '未填写')
+    content.extend((False, line) for line in visible_notes[3:])
+    steps = _step_text(item)
+    if steps:
+        text_block(content, '处理步骤与范围', '\n'.join(steps))
+    for event in item['events']:
+        text_block(content, f"{event['code']} · {event['name']}", _event_text(event))
+    more_parameters = {key: value for key, value in item['acquisition'].items()
+                       if value and value != '未记录'
+                       and (key not in _LINE_PARAMETERS or len(_pdf_wrap(f'{key}  {value}', 48)) > 1)}
+    if more_parameters:
+        text_block(content, '采集参数', '\n'.join(f'{key}  {value}' for key, value in more_parameters.items()))
+    return content
+
+
+def _pdf_overview(narrative, focus, others, text_block):
+    overview = []
+    text_block(overview, '测量目的', narrative.get('objective'))
+    text_block(overview, '主要发现', narrative.get('findings') or '未填写项目发现')
+    text_block(overview, '重点测线', ' · '.join(
+        f"{item['line_id']} {item['name']}" for item in focus))
+    warnings = [f"{item['line_id']} {item['quality'].get('orientation_message') or item['quality'].get('status')}"
+                for item in focus + others if item['quality'].get('status') in ('失败', '警告')]
+    if warnings:
+        text_block(overview, '质检提示', '\n'.join(warnings))
+    return overview
+
+
+def _write_pdf_line(pdf, item, summary, font_name, page, image, text_block, write_page, write_text_pages):
+    title = f"{item['line_id']} · {item['name']}"
+    fig = page(title[:44])
+    qc = item['quality']
+    _draw_pdf_line_header(fig, item, summary, image, font_name)
+    image(fig, item['raw_figure'], [.05, .495, .90, .232])
+    if item['processed_figure']:
+        image(fig, item['processed_figure'], [.05, .252, .90, .232])
+    elif item['raw_figure']:
+        message = '所选处理剖面不可用' if item['primary_artifact_id'] else '仅原始剖面'
+        fig.text(.07, .485, message, fontname=font_name, fontsize=9)
+    baseline = .245 if item['processed_figure'] else .454 if item['raw_figure'] else .723
+    notes = list(item['figure_notes'])
+    if qc.get('status') in ('失败', '警告'):
+        notes.insert(0, qc.get('orientation_message') or qc['status'])
+    visible_notes = [line for note in notes for line in _pdf_wrap(note, 93)]
+    for row, line in enumerate(visible_notes[:3]):
+        fig.text(.07, baseline - .019 * row, line, fontname=font_name, fontsize=8, color='#475569')
+    content = _pdf_line_content(item, visible_notes, text_block)
+    analysis = item['analysis']
+    next_y = baseline - .021 * len(visible_notes[:3]) - .026
+    available = max(0, int((next_y - .055) / .020))
+    if len(content) > available:
+        available = max(0, available - 2)
+    for row, (label, value) in enumerate(content[:available]):
+        fig.text(.07, next_y - .020 * row, value, fontname=font_name, fontsize=9,
+                 fontweight='bold' if label else 'normal')
+    remaining = content[available:]
+    if remaining:
+        fig.text(.07, .057, '见续页', fontname=font_name, fontsize=8, color='#475569')
+    write_page(pdf, fig)
+    write_text_pages(pdf, f"{item['line_id']} · 处理与分析", remaining)
+    if item['detail_figures']:
+        fig = page(f"{analysis['code']} · 局部剖面")
+        fig.text(.07, .898, f"原始第 {analysis['first_trace']}–{analysis['last_trace']} 道",
+                 fontname=font_name, fontsize=10)
+        for index, name in enumerate(item['detail_figures']):
+            image(fig, name, [.05, .57 - .30 * index, .90, .29])
+        if item['detail_note']:
+            fig.text(.07, .53, item['detail_note'], fontname=font_name, fontsize=9)
+        write_page(pdf, fig)
+
+def _write_pdf_survey_map(pdf, summary, dossiers, page, image, write_rows, write_page, write_text_pages):
+    missing = [item['line_id'] for item in dossiers if item['map_status'] == '无法在地图定位']
+    if (summary['plan_map'] and len(dossiers) > 1) or (missing and len(dossiers) > 1):
+        fig = page('测区路线总图')
+        y = image(fig, summary['plan_map'], [.05, .30, .90, .59], anchor='N') - .027
+        map_rows = _pdf_wrap('无法在地图定位 · ' + '、'.join(missing), 92) if missing else []
+        map_rows.extend(_pdf_wrap(summary.get('plan_map_note'), 92))
+        write_rows(fig, [(False, row) for row in map_rows[:5]], y)
+        write_page(pdf, fig)
+        write_text_pages(pdf, '地图定位状态（续）', [(False, row) for row in map_rows[5:]])
+
+
+def _pdf_conclusions(narrative, boreholes, text_block):
+    conclusions = []
+    text_block(conclusions, '结论', narrative.get('conclusion') or '未填写项目结论')
+    if boreholes:
+        count = sum(row.get('status') == 'passed' for row in boreholes)
+        text_block(conclusions, '钻孔对比', f'{count} / {len(boreholes)} 项误差达标，逐项数值见钻孔对比表。')
+    return conclusions
+
+
+def _pdf_borehole_tables(pdf, boreholes, table_page):
+    for offset in range(0, len(boreholes), 24):
+        title = f'钻孔对比 · {offset // 24 + 1}' if len(boreholes) > 24 else '钻孔对比'
+        table_page(pdf, title, _BOREHOLE_COLUMNS, boreholes[offset:offset + 24])
+
+
+def _write_pdf_report(path: Path, *, summary: dict[str, Any], boreholes: list[dict[str, Any]],
+                      figure_paths: list[Path]) -> None:
     """Write the paginated engineering PDF with cover, approvals and appendices.
 
     CSV/JSON/XLSX remain the normalized evidence tables and the checksum manifest
@@ -256,10 +468,6 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], lines: list[dict[s
 
     configured_font = configure_matplotlib_cjk_fonts()
     font_name = configured_font if configured_font != "DejaVu Sans" else _choose_font()
-    sensor_sync = sensor_sync or []
-    gis_layers = gis_layers or []
-    boreholes = boreholes or []
-    figure_paths = figure_paths or []
     page_number = 0
 
     def _page(title: str):
@@ -270,7 +478,6 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], lines: list[dict[s
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
         fig.text(0.06, 0.955, title, fontsize=18, fontweight="bold", fontname=font_name)
-        fig.text(0.06, 0.928, "MyGPR 正式工程成果报告 · 可审计交付包", fontsize=9, color="#4b5563", fontname=font_name)
         fig.text(0.50, 0.025, f"第 {page_number} 页", fontsize=8, color="#64748B", ha="center", fontname=font_name)
         fig.text(0.94, 0.025, str(summary.get("report_revision", "R1")), fontsize=8, color="#64748B", ha="right", fontname=font_name)
         return fig
@@ -290,7 +497,8 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], lines: list[dict[s
         data = [[str(row.get(h, ""))[:42] for h in headers] for row in rows[:limit]]
         if not data:
             data = [["无记录"] + [""] * (len(headers) - 1)]
-        table = ax.table(cellText=data, colLabels=headers, loc="upper left", cellLoc="left")
+        table = ax.table(cellText=data, colLabels=[_REPORT_HEADERS.get(key, key) for key in headers],
+                         loc="upper left", cellLoc="left")
         table.auto_set_font_size(False)
         table.set_fontsize(7)
         table.scale(1.0, 1.35)
@@ -305,84 +513,84 @@ def _write_pdf_report(path: Path, *, summary: dict[str, Any], lines: list[dict[s
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     project = summary.get("project", {})
     metrics = summary.get("metrics", {})
-    with PdfPages(tmp) as pdf:
-        fig = _page(f"{project.get('name', 'MyGPR 项目')} 成果报告")
-        y = _kv_lines(
-            fig,
-            0.86,
-            [
-                ("生成时间", summary.get("generated_at", "")),
-                ("项目编号", project.get("project_no", "--")),
-                ("测区位置", project.get("location", "--")),
-                ("操作员", project.get("operator", "--")),
-                ("设备型号", project.get("device_model", "--")),
-                ("坐标系统", project.get("coordinate_system", "--")),
-                ("高程基准", project.get("vertical_datum", "--")),
-                ("项目快照", (summary.get("snapshot") or {}).get("snapshot_id", "--")),
-                ("空间成果版本", (summary.get("source_binding") or {}).get("spatial_result_id", "未绑定") or "未绑定"),
-                ("项目路径", project.get("project_path", "--")),
-            ],
-        )
-        metric_rows = [
-            ("测线数量", metrics.get("line_count", 0)),
-            ("已导入测线", metrics.get("imported_line_count", 0)),
-            ("质检通过", metrics.get("qc_passed_count", 0)),
-            ("质检警告", metrics.get("qc_warning_count", 0)),
-            ("处理结果", metrics.get("processing_artifact_count", 0)),
-            ("界面标注测线", metrics.get("interface_line_count", 0)),
-            ("空间成果", metrics.get("spatial_export_count", 0)),
-            ("钻孔误差达标", f"{metrics.get('borehole_passed_count', 0)}/{metrics.get('borehole_comparison_count', 0)}"),
-        ]
-        fig.text(0.075, y - 0.035, "核心统计", fontsize=13, fontweight="bold", fontname=font_name)
-        _kv_lines(fig, y - 0.075, metric_rows)
-        fig.text(0.075, 0.20, "交付说明", fontsize=13, fontweight="bold", fontname=font_name)
-        fig.text(0.075, 0.17, "PDF 为交付摘要；CSV、JSON、HTML 文件保留完整可审计数据。", fontsize=10, fontname=font_name)
-        pdf.savefig(fig, bbox_inches="tight")
+
+    figures = {item.name: item for item in figure_paths if item.exists()}
+    narrative = summary['project_analysis']
+    focus, others = _ordered_dossiers(summary)
+
+    def write_page(pdf, fig):
+        pdf.savefig(fig)
         plt.close(fig)
 
-        fig = _page("审批与签署")
-        approval = [
-            ("编制", project.get("compiler") or project.get("operator") or "--"),
-            ("复核", project.get("reviewer") or "--"),
-            ("批准", project.get("approver") or "--"),
+    def image(fig, name, rect, *, anchor='C'):
+        if name in figures:
+            ax = fig.add_axes(rect)
+            ax.imshow(plt.imread(figures[name]))
+            ax.axis('off')
+            ax.set_anchor(anchor)
+            return ax.get_position().y0
+        return rect[1] + rect[3]
+
+    def write_rows(fig, rows, start_y):
+        for row, (label, value) in enumerate(rows):
+            fig.text(.07, start_y - row * .022, value, fontname=font_name,
+                     fontsize=9.5, fontweight='bold' if label else 'normal')
+
+    def write_text_pages(pdf, title, text_rows):
+        for offset in range(0, len(text_rows), 38):
+            fig = _page(title if offset == 0 else f'{title}（续）')
+            write_rows(fig, text_rows[offset:offset + 38], .886)
+            write_page(pdf, fig)
+
+    def text_block(rows, label, value):
+        if value:
+            rows.append((True, label))
+            rows.extend((False, row) for row in _pdf_wrap(value, 88))
+            rows.append((False, ''))
+
+    with PdfPages(tmp) as pdf:
+        fig = _page(f"{project.get('name', 'MyGPR 项目')} 成果报告"[:47])
+        _kv_lines(fig, .887, [
+            ('项目编号', project.get('project_no') or '—'),
+            ('测区位置', str(project.get('location') or '—')[:55]),
+            ('交付范围', f"{metrics.get('line_count', 0)} 条测线 · "
+             f"{len(summary.get('report_profile', {}).get('selected_artifact_ids', ()))} 项处理成果"),
+            ('生成时间', summary.get('generated_at', '')),
+        ])
+        overview = _pdf_overview(narrative, focus, others, text_block)
+        for row, (label, value) in enumerate(overview[:26]):
+            fig.text(.075, .727 - row * .023, value, fontname=font_name, fontsize=10,
+                     fontweight='bold' if label else 'normal')
+        write_page(pdf, fig)
+        write_text_pages(pdf, '项目摘要（续）', overview[26:])
+
+        _write_pdf_survey_map(pdf, summary, focus + others, _page, image, write_rows, write_page, write_text_pages)
+        for item in focus:
+            _write_pdf_line(pdf, item, summary, font_name, _page, image, text_block, write_page, write_text_pages)
+        write_text_pages(pdf, '结论与验证', _pdf_conclusions(narrative, boreholes, text_block))
+        for item in others:
+            _write_pdf_line(pdf, item, summary, font_name, _page, image, text_block, write_page, write_text_pages)
+
+        fig = _page('交付附件与版本')
+        attachment_rows = [
+            ('采集参数', 'tables/acquisition_parameters.csv'),
+            ('逐线资料', 'json/line_dossiers.json'),
+            ('标记清单', 'json/markers.csv'),
+            ('文件校验', 'checksums.sha256'),
+            ('报告快照', (summary.get('snapshot') or {}).get('snapshot_id', '')),
         ]
-        y = 0.82
-        for role, person in approval:
-            fig.text(0.10, y, role, fontsize=12, fontweight="bold", fontname=font_name)
-            fig.text(0.25, y, str(person), fontsize=11, fontname=font_name)
-            fig.text(0.55, y, "签字：________________", fontsize=10, fontname=font_name)
-            fig.text(0.76, y, "日期：____________", fontsize=10, fontname=font_name)
-            y -= 0.16
-        fig.text(0.10, 0.28, "报告版本", fontsize=11, fontweight="bold", fontname=font_name)
-        fig.text(0.25, 0.28, str(summary.get("report_revision", "R1")), fontsize=11, fontname=font_name)
-        fig.text(0.10, 0.22, "数据完整性", fontsize=11, fontweight="bold", fontname=font_name)
-        fig.text(0.25, 0.22, "详见 checksums.sha256 与 file_audit.csv", fontsize=10, fontname=font_name)
-        pdf.savefig(fig, bbox_inches="tight"); plt.close(fig)
-
-        fig = _page("目录")
-        chapters = ["1 项目概况", "2 测线与数据质检", "3 雷达—RTK—IMU 同步", "4 数据处理与可追溯", "5 基覆界面标注", "6 空间成果与 GIS", "7 钻孔对比", "8 工程图件", "附录 数据清单与校验"]
-        y=0.84
-        for idx, chapter in enumerate(chapters, start=1):
-            fig.text(0.12,y,chapter,fontsize=11,fontname=font_name)
-            fig.text(0.88,y,str(idx+3),fontsize=10,ha="right",fontname=font_name)
-            y-=0.065
-        pdf.savefig(fig,bbox_inches="tight"); plt.close(fig)
-
-        _table_page(pdf, "测线清单", ["line_id", "name", "length_m", "data_quality", "rtk_status", "sensor_sync_status", "processing_status", "target_count"], lines)
-        _table_page(pdf, "数据质检", ["line_id", "line_name", "status", "sample_count", "trace_count", "orientation_message"], quality)
-        _table_page(pdf, "雷达—RTK—IMU 同步", ["line_id", "status", "rtk_coverage_ratio", "rtk_fixed_ratio", "rtk_max_residual_s", "imu_coverage_ratio", "gap_count", "jump_count", "warning_count"], sensor_sync)
-        _table_page(pdf, "处理结果与哈希", ["artifact_id", "line_id", "method_id", "role", "status", "output_shape", "output_data_sha256"], artifacts)
-        _table_page(pdf, "基覆界面标注", ["line_id", "status", "keypoint_count", "coverage_ratio", "judged_ratio", "weak_ratio", "ignore_ratio", "no_interface_ratio"], interfaces)
-        _table_page(pdf, "空间成果", ["line_id", "spatial_csv_path", "row_count", "has_xy_count", "empty_xy_count"], spatial)
-        _table_page(pdf, "GIS 图层", ["name", "kind", "role", "crs", "geometry_type", "is_dem", "source_path"], gis_layers)
-        _table_page(pdf, "钻孔对比", ["borehole_id", "line_id", "trace_index", "borehole_depth_m", "interpreted_depth_m", "error_m", "absolute_error_m", "threshold_m", "status"], boreholes)
-        for figure_path in figure_paths:
-            if not figure_path.exists():
+        if summary['files'].get('processing_parameters_json'):
+            attachment_rows.insert(2, ('处理参数', 'json/processing_parameters.json'))
+        _kv_lines(fig, .878, attachment_rows)
+        y = .65
+        for role, key in _REPORT_SIGNERS:
+            if not project.get(key):
                 continue
-            fig = _page(f"工程图件 · {figure_path.stem}")
-            image = plt.imread(figure_path)
-            ax = fig.add_axes([0.06, 0.10, 0.88, 0.78]); ax.imshow(image); ax.axis("off")
-            pdf.savefig(fig, bbox_inches="tight"); plt.close(fig)
+            fig.text(.075, y, role, fontsize=10, fontweight='bold', fontname=font_name)
+            fig.text(.24, y, project[key], fontsize=10, fontname=font_name)
+            y -= .027
+        write_page(pdf, fig)
+        _pdf_borehole_tables(pdf, boreholes, _table_page)
     tmp.replace(path)
 
-__all__ = ['_write_xlsx_report', '_write_report_figures', '_write_checksums', '_write_html_report', '_write_pdf_report']
+__all__ = ['_write_xlsx_report', '_write_checksums', '_write_html_report', '_write_pdf_report']

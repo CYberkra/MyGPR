@@ -118,8 +118,7 @@ class FileTreePanel(DockPanel):
     # 永久删除语义），面板自身不弹确认框
     artifact_delete_requested = pyqtSignal(str, str)
     processing_package_requested = pyqtSignal(str, str)  # line_id, artifact_id (empty = whole line)
-    # 空间成果/项目报告叶子点击 → 跳成果页（参数为 kind：'spatial'/'report'）
-    delivery_focus_requested = pyqtSignal(str)
+    delivery_focus_requested = pyqtSignal(str, str)  # kind, result ID or report directory
 
     def __init__(self, parent=None) -> None:
         super().__init__('项目资源', constants.FILE_TREE_PANEL_WIDTH, parent)
@@ -692,8 +691,8 @@ class FileTreePanel(DockPanel):
         elif kind == 'artifact' and payload:
             self.artifact_focus_requested.emit(
                 str(item.data(0, _ROLE_AUX) or ''), str(payload))
-        elif kind in ('spatial', 'report'):
-            self.delivery_focus_requested.emit(str(kind))
+        elif kind in ('spatial', 'report') and payload:
+            self.delivery_focus_requested.emit(str(kind), str(payload))
 
     def _on_item_double_clicked(self, item, _column: int) -> None:
         """文件双击 → 系统默认程序打开（目录双击保留默认展开/收起）。"""
@@ -868,7 +867,7 @@ class FileTreePanel(DockPanel):
             parent = artifact_direct_parent(artifact)
             details.extend([
                 f'名称：{getattr(artifact, "name", "")}',
-                f'直接输入：{"来源待核对" if parent is None else parent or "原始输入"}',
+                f'直接输入：{"未记录" if parent is None else parent or "原始输入"}',
                 f'形状：{getattr(artifact, "shape", ())}',
                 f'数据类型：{getattr(artifact, "dtype", "") or "未记录"}',
                 f'输出 SHA-256：{getattr(artifact, "sha256", "") or "未记录"}',

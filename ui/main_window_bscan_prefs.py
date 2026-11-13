@@ -128,6 +128,9 @@ class BScanPreferenceMixin:
             ('bscan_colorbar_visible', 'colorbar'), ('bscan_contrast', 'contrast'),
         )}
         state['levels'] = list(self._setting_levels())
+        state.update(gain=self._setting_choice('bscan_gain_mode', ('off', 'sec', 'tvg'), 'off'),
+                     gain_alpha=self.settings.get('bscan_gain_alpha', 0.2))
+        state['gain_db'], state['gain_power'] = self._setting_tvg_params()
         return state
 
     def _on_qc_marks_visible_changed(self, visible: bool) -> None:
@@ -214,7 +217,7 @@ class BScanPreferenceMixin:
                 view.set_display_levels(values['bscan_p_low'], values['bscan_p_high'], notify=False)
             if 'bscan_colorbar_visible' in changed:
                 view.set_colorbar_visible(bool(values.get('bscan_colorbar_visible', True)), notify=False)
-            if {'bscan_gain_mode', 'bscan_gain_alpha'} & changed:
+            if {'bscan_gain_mode', 'bscan_gain_alpha', 'bscan_tvg_db', 'bscan_tvg_power'} & changed:
                 tvg_db, tvg_power = self._setting_tvg_params()
                 view.set_gain(str(values.get('bscan_gain_mode', 'off')),
                               alpha=float(values.get('bscan_gain_alpha', 0.2)),
@@ -254,13 +257,11 @@ class BScanPreferenceMixin:
         return min(max(db, 0.0), 60.0), min(max(power, 0.3), 3.0)
 
     def _mirror_bscan_tvg_params(self, db: float, power: float) -> None:
-        """TVG 滑条面板关闭时的参数持久化（两个键各一次写盘，幂等）。
-
-        这两个键不进设置页控件（滑条面板是唯一调参入口），closeEvent 的
-        整体回写是**合并语义**（只覆盖设置页认识的键），不冲突。
-        """
-        self._persist_setting('bscan_tvg_db', float(db))
-        self._persist_setting('bscan_tvg_power', float(power))
+        values = {'bscan_tvg_db': float(db), 'bscan_tvg_power': float(power)}
+        for key, value in values.items():
+            self.settings.set(key, value)
+        self.settings.save()
+        self._sync_settings_page_bscan(values)
 
     def _persist_bscan_levels(self, low: float, high: float) -> None:
         """色阶两个键必须同一次写盘，否则中途崩溃会留下 low>high 的坏状态。"""

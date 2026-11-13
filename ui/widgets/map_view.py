@@ -27,12 +27,12 @@ from PyQt6.QtCore import QObject, QRectF, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import ToolButton, isDarkTheme
+from qfluentwidgets import PushButton, ToolButton, isDarkTheme
 
 from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
 from ui.theme_helpers import control_palette
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action, bind_menu_keys, make_menu, show_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.pg_view_base import GraphicsViewBase
 from ui.widgets.map_tiles import (DEFAULT_TILE_SOURCE, TILE_SOURCE_MAX_ZOOM,
@@ -509,13 +509,15 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._dark = bool(isDarkTheme())
         self.setBackground('k' if self._dark else 'w')
         self.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+        self._menu_shortcuts = bind_menu_keys(self, self._show_map_menu)
         self.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
         # ---------------- 浮动覆盖层（子控件，resizeEvent 中定位） ----------------
         # 全幅空态引导（评审 P0-1）：先于其他浮层创建，图例/缩放钮保持其上
+        self.sync_track_button = PushButton('传感器同步…', self, FIF.SYNC)
+        self.sync_track_button.hide()
         self._empty_overlay = EmptyStateOverlay(
-            self, icon=FIF.GLOBE, title='暂无定位轨迹',
-            hint='打开含定位信息的测线后，此处显示底图与航迹')
+            self, icon=FIF.GLOBE, title='暂无定位轨迹', action=self.sync_track_button)
 
         # 左上：测线图例（色块 + 名称），set_tracks 时重建
         self._legend = QFrame(self)
@@ -649,8 +651,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._raw_tracks = list(tracks or [])
         self._track_colors = dict(colors or {})
         self._render_tracks()
-        # 空态引导：无任何测线时显示（评审 P0-1）
-        self._empty_overlay.setVisible(not self._raw_tracks)
+
+    def set_empty_message(self, text: str, *, can_sync: bool = False) -> None:
+        self._empty_overlay._title_label.setText(text)
+        self.sync_track_button.setVisible(can_sync)
+        self._empty_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, not can_sync)
 
     def _render_tracks(self) -> None:
         """按当前底图坐标系（WGS84 / GCJ-02）转换并绘制测线。"""
@@ -674,10 +679,13 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
             color = QColor(colors.get(info['line_id'], constants.CHART_TRACK_DEFAULT))
             pen = pg.mkPen(color, width=2)
             line_item = self._plot.plot(xs, ys, pen=pen)
+            line_item.setCurveClickable(True, width=8)
             endpoint_item = pg.ScatterPlotItem(
                 [xs[0], xs[-1]], [ys[0], ys[-1]], symbol='o', size=9,
                 pen=pg.mkPen(color, width=1), brush=pg.mkBrush(color))
             self._plot.addItem(endpoint_item)
+            for item in (line_item, line_item.curve, endpoint_item):
+                item._context_line_id = info['line_id']
             self._track_items.extend([line_item, endpoint_item])
             all_x.append(xs)
             all_y.append(ys)
@@ -690,6 +698,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
             self._overlay_layer.setVisible(self._basemap_enabled and overlay_key is not None)
         self.fit_to_tracks()
         self._rebuild_legend()
+        self._empty_overlay.setVisible(not all_x)
 
     def shutdown(self) -> None:
         """Drain both base and annotation layers before Qt destroys their pools."""
@@ -740,7 +749,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         entries = []
         for info in self._track_summaries:
             label = info.get('name') or info.get('line_id')
-            if not label:
+            if not label or not np.any(np.isfinite(info['xs']) & np.isfinite(info['ys'])):
                 continue
             color = self._track_colors.get(info.get('line_id'), constants.CHART_TRACK_DEFAULT)
             entries.append((label, color))
@@ -813,6 +822,14 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         super().resizeEvent(event)
         self._layout_overlays()
 
+    def fit_to_line(self, line_id) -> None:
+        self._fit_track_summaries(info for info in self._track_summaries if info['line_id'] == line_id)
+
+    def can_fit_line(self, line_id) -> bool:
+        return any(info['line_id'] == line_id and info['mapped']
+                   and np.any(np.isfinite(info['xs']) & np.isfinite(info['ys']))
+                   for info in self._track_summaries)
+
     def fit_to_tracks(self) -> None:
         """视野自适应到全部轨迹范围（右键菜单"适应全部测线"同用）。
 
@@ -822,8 +839,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         1,116 m 的测线被压到视野宽度的 0.01%，用户看到「地图上什么都没有」。
         全部未配准时**不动视野**（宁可保持原样，也不要跳到世界原点）。
         """
+        self._fit_track_summaries(self._track_summaries)
+
+    def _fit_track_summaries(self, summaries) -> None:
         all_x, all_y = [], []
-        for info in self._track_summaries:
+        for info in summaries:
             if not info.get('mapped'):
                 continue
             xs, ys = info.get('xs'), info.get('ys')
@@ -849,26 +869,41 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
             return
         if not self._plot.sceneBoundingRect().contains(event.scenePos()):
             return
+        self._show_map_menu(event.screenPos().toPoint(), event.scenePos())
+
+    def _show_map_menu(self, position=None, scene_pos=None):
         menu = make_menu(self)
+        add_line_actions = getattr(self, 'add_line_menu_actions', None)
+        if add_line_actions and scene_pos is not None:
+            line_id = next((line for item in self.scene().items(scene_pos)
+                            if (line := getattr(item, '_context_line_id', ''))), '')
+            if line_id:
+                add_line_actions(menu, line_id)
+                menu.addSeparator()
         add_action(menu, FIF.FIT_PAGE, '适应全部测线', self.fit_to_tracks,
                    enabled=bool(self._track_summaries))
         add_action(menu, FIF.ZOOM_IN, '放大', self.zoom_in)
         add_action(menu, FIF.ZOOM_OUT, '缩小', self.zoom_out)
-        add_action(menu, FIF.DOWNLOAD, '下载当前区域瓦片',
-                   self.prefetch_current_view)
         menu.addSeparator()
-        add_action(menu, FIF.COPY, '复制中心坐标', self._copy_center_lonlat)
+        point = self._plot.vb.mapSceneToView(scene_pos) if scene_pos is not None else self._plot.vb.viewRect().center()
+        coordinate = self._lonlat_text(point)
+        label = '复制此处坐标（WGS84）' if scene_pos is not None else '复制中心坐标（WGS84）'
+        add_action(menu, FIF.COPY, label,
+                   lambda: QApplication.clipboard().setText(coordinate), enabled=self._basemap_enabled)
         add_action(menu, FIF.SAVE, '导出 PNG…',
                    lambda: self.export_png(prefix='map'))
-        menu.exec(event.screenPos().toPoint())
+        show_menu(menu, position if position is not None else self.mapToGlobal(self.rect().center()))
 
     def _copy_center_lonlat(self) -> None:
         """视图中心 → WGS84 经纬度（'纬度,经度'，便于粘贴到奥维等软件对照）。"""
         center = self._plot.vb.viewRect().center()
-        lon, lat = mercator_to_lonlat(center.x(), center.y())
+        QApplication.clipboard().setText(self._lonlat_text(center))
+
+    def _lonlat_text(self, point):
+        lon, lat = mercator_to_lonlat(point.x(), point.y())
         if is_gcj02_source(self._layer.source_key()):
             lon, lat = gcj02_to_wgs84(lon, lat)
-        QApplication.clipboard().setText(f'{lat:.6f},{lon:.6f}')
+        return f'{lat:.6f},{lon:.6f}'
 
     def track_summaries(self) -> list[dict]:
         """最近一次 set_tracks 的坐标转换摘要（投影信息卡用）。"""

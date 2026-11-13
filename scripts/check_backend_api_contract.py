@@ -33,6 +33,7 @@ PUBLIC_TYPES = (
 )
 
 PUBLIC_METHODS = (
+    "submit_marker_selection",
     "create_default",
     "submit_processing",
     "submit_pipeline",

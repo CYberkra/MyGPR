@@ -35,16 +35,24 @@ class ProcessingMenus:
         return artifact_parameters(art)
 
     def _source_menu(self, key):
-        source = self._sources.get(key)
         menu = make_menu(self)
+        self._add_source_actions(menu, key)
+        return menu
+
+    def _add_source_actions(self, menu, key, *, group_id=None, tab_guard=None):
+        source = self._sources.get(key)
         if not source:
-            return menu
+            return
         target = self._draft_key(key)
         def current(callback):
             if key in self._sources and target == self._draft_key(key):
-                callback()
-        object_action(menu, 'continue-source', '从此结果继续处理',
-                      lambda: current(lambda: self._workspace.open_source(key)),
+                if tab_guard is not None:
+                    tab_guard(callback)
+                else:
+                    callback()
+        object_action(menu, 'source-info', '参数与来源…', lambda: current(lambda: self._show_source_info(key)))
+        object_action(menu, 'continue-source', '设为处理输入',
+                      lambda: current(lambda: self._workspace.open_source(key, group_id)),
                       enabled=not source.get('error'), reason='数据读取失败，请重试预览')
         aid = source.get('artifact_id')
         if aid:
@@ -57,23 +65,18 @@ class ProcessingMenus:
             object_action(menu, 'reconfigure-step', '修改此步参数并另建分支…',
                           lambda: current(reconfigure),
                           enabled=self.can_reconfigure_artifact(aid), reason='缺少已保存的直接步骤输入')
-        object_action(menu, 'source-info', '参数与来源…', lambda: current(lambda: self._show_source_info(key)))
         if source.get('error'):
             object_action(menu, 'retry-preview', '重试预览', lambda: current(lambda: self.retry_preview(key)))
-        if aid:
+        if aid and tab_guard is None:
             object_action(menu, 'delete-source', '永久删除此成果及依赖成果…',
                 lambda: current(lambda: self.artifact_delete_requested.emit(target[1], [aid]) if not self._running else None),
                 enabled=not self._running, reason='任务运行中')
-        return menu
 
-    def _show_source_menu(self, key, pos):
+    def _add_tab_source_actions(self, menu, key, group_id, guard):
         if self._comparison.owns(key):
-            self._comparison.show_menu(key, pos)
-            return
-        menu = self._source_menu(key)
-        menu._object_keyboard = FluentMenuKeyboard(menu)
-        menu.exec(pos)
-        menu._object_keyboard.focus_menu(menu)
+            self._comparison.add_menu_actions(menu, key, guard)
+        else:
+            self._add_source_actions(menu, key, group_id=group_id, tab_guard=guard)
 
     def _run_signature(self, group):
         return tuple(sorted((aid, str(getattr(art, 'sha256', '') or ''),
@@ -103,12 +106,12 @@ class ProcessingMenus:
         object_action(menu, 'open-final', '打开最终成果', lambda: current(lambda: self.select_artifact(final_id)))
         object_action(menu, 'open-saved-steps', '打开本次已保存步骤',
                       lambda: current(lambda: [self.select_artifact(str(art.artifact_id)) for art in members]))
-        object_action(menu, 'locate-run-input', '定位冻结输入',
+        object_action(menu, 'locate-run-input', '打开当时使用的数据',
                       lambda: current(lambda: input_current(lambda: self._workspace.open_source(saved[0]))),
-                      enabled=saved is not None, reason='输入缺失、修订变化或来源待核对')
-        object_action(menu, 'reconfigure-run', '按原输入重新配置本次运行…',
+                      enabled=saved is not None, reason='当时使用的数据无法打开')
+        object_action(menu, 'reconfigure-run', '载入这次的步骤和参数…',
                       lambda: current(lambda: input_current(lambda: self.reconfigure_run(group))),
-                      enabled=saved is not None, reason='缺少完整配置、有效原输入或输入草稿被锁定')
+                      enabled=saved is not None, reason='缺少原输入或完整步骤')
         record = {'run_group_id': group, 'project_id': scope[0], 'line_id': scope[1],
                   'outputs': [{'artifact_id': str(art.artifact_id), 'status': str(getattr(art, 'status', '')),
                                'sha256': str(getattr(art, 'sha256', '') or ''), 'params': artifact_parameters(art)} for art in members]}
@@ -139,6 +142,7 @@ class ProcessingMenus:
             if key != self._draft_key() or self._draft_locked() or not self._draft_backups.get(key):
                 return
             backup = self._draft_backups[key].pop()
+            self._reset_step_tools()
             self._suspend = True
             self._pipeline_list.set_steps(deepcopy(backup.get('steps') or []))
             self._result_name_edit.setText(backup.get('result_name') or '')
@@ -146,18 +150,15 @@ class ProcessingMenus:
             if self._pipeline_list.count():
                 self._pipeline_list.select_step(0)
             self._draft_changed()
-        object_action(menu, 'add-step', '添加处理步骤…', lambda: current(self._open_method_picker), enabled=not self._draft_locked())
-        object_action(menu, 'edit-step', '编辑选中步骤…', lambda: current(lambda: self._open_step_editor(self._selected_step)),
-                   enabled=not self._draft_locked() and self._selected_step >= 0)
+        object_action(menu, 'copy-draft', '复制待执行配置', lambda: QApplication.clipboard().setText(
+                   json.dumps(self.current_pipeline(), ensure_ascii=False, indent=2)) if key == self._draft_key() else None)
         object_action(menu, 'restore-draft', '恢复此输入的上一个草稿', restore,
                    enabled=not self._draft_locked() and bool(self._draft_backups.get(key)))
-        object_action(menu, 'copy-draft', '复制待执行配置', lambda: current(lambda: QApplication.clipboard().setText(
-                   json.dumps(self.current_pipeline(), ensure_ascii=False, indent=2))))
         stale = [{'revision': k[3], 'draft': value} for k, value in self._drafts.items()
                  if k[:3] == key[:3] and k != key and value.get('steps')]
         if stale:
-            object_action(menu, 'stale-drafts', '查看旧修订草稿（已失效）…', lambda: current(lambda:
-                self._show_details('旧修订草稿 · 已失效，不能用于当前数据',
+            object_action(menu, 'stale-drafts', '查看旧步骤…', lambda: current(lambda:
+                self._show_details('数据更新前的处理步骤',
                                    json.dumps(stale, ensure_ascii=False, indent=2, default=str))))
         return menu
 

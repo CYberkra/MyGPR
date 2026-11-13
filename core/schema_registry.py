@@ -274,6 +274,7 @@ for _definition in (
     SchemaDefinition("mygpr.project_integrity_report", 1, _require_keys("project_root", "summary", "issues"), owner="project"),
     SchemaDefinition("mygpr.project_runtime_session", 1, _require_keys("session_id", "state", "opened_at"), owner="project"),
     SchemaDefinition("mygpr.release_hardening_evidence", 1, _require_keys("checks", "summary"), owner="release"),
+    SchemaDefinition("mygpr.marker_events", 1, _require_keys("project_id", "line_id", "source_id", "revision", "markers", "intervals"), owner="project-markers"),
     SchemaDefinition("mygpr.module_linkage_evidence", 1, _require_keys("stages", "screenshots"), owner="ui"),
     SchemaDefinition("mygpr.sensor_sync", 2, migrations={1: _migrate_sensor_sync_v1}, owner="sync"),
     SchemaDefinition("mygpr.gis_layers", 2, _require_keys("layers"), {1: _migrate_gis_layers_v1}, owner="gis"),

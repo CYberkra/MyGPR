@@ -61,7 +61,6 @@ class SavedSourcePath(QWidget):
                 item.widget().hide()
                 item.widget().deleteLater()
         self._buttons = []
-        self._row.addWidget(CaptionLabel('已完成来源' if entries else '未选择输入', self))
         visible = entries if len(entries) <= 4 else [entries[0], None, *entries[-3:]]
         for index, entry in enumerate(visible):
             if index:

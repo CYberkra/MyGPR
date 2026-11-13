@@ -6,6 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import re
+import uuid
 from threading import RLock
 from typing import Any, Mapping, Sequence
 
@@ -19,7 +20,6 @@ from core.field_project_store import FieldProjectStore
 from core.gpr_data_model import GPRDataSet, apply_time_window_override, time_to_depth_axis
 from core.quality_trace_locations import locate_trace_issues
 from dataclasses import replace
-from core.field_report_export import generate_project_report_package
 from core.processing_artifact_index import ProcessingArtifactRecord, index_processing_artifacts
 from core.sensor_sync import SensorSyncConfig
 from core.sensor_sync_service import synchronize_project_line_sensors
@@ -40,6 +40,8 @@ from mygpr.infrastructure.persistence.permanent_deletion import PermanentDeletio
 from mygpr.infrastructure.persistence.spatial_adapter import SpatialPersistenceMixin
 from mygpr.infrastructure.persistence.velocity_adapter import VelocityPersistenceMixin
 from mygpr.infrastructure.persistence.grid_adapter import GridPersistenceMixin
+from mygpr.infrastructure.persistence.marker_adapter import MarkerPersistenceMixin
+from mygpr.infrastructure.persistence.report_adapter import ReportPersistenceMixin
 from mygpr.application.project.ports import ProjectRepositoryPort, ProjectSessionPort
 from mygpr.domain.reporting.models import ReportPackage
 from mygpr.domain.acquisition.models import ProjectSensorSyncResult, SensorSyncSettings
@@ -225,6 +227,7 @@ class ProjectDataPersistenceMixin:
 
 
 class LegacyFieldProjectSession(
+    MarkerPersistenceMixin, ReportPersistenceMixin,
     PermanentDeletionMixin,
     ProjectDataPersistenceMixin, LinePropertiesMixin, InterpretationPersistenceMixin, IntermediateCleanupMixin, SpatialPersistenceMixin,
     VelocityPersistenceMixin, GridPersistenceMixin, ProcessingPackageMixin, ProjectSessionPort
@@ -256,7 +259,7 @@ class LegacyFieldProjectSession(
 
     def get_metadata(self) -> ProjectMetadata:
         manifest = self._store.manifest
-        return ProjectMetadata(manifest.project_id, manifest.name, manifest.location, manifest.operator, manifest.project_no, manifest.device_model, manifest.coordinate_system, manifest.vertical_datum)
+        return ProjectMetadata(manifest.project_id, manifest.name, manifest.location, manifest.operator, manifest.project_no, manifest.device_model, manifest.coordinate_system, manifest.vertical_datum, manifest.timezone)
 
     def update_metadata(self, **changes: str | None) -> ProjectMetadata:
         with self._lock:
@@ -474,7 +477,7 @@ class LegacyFieldProjectSession(
             time_window_ns=time_window_ns,
             dielectric_constant=dielectric_constant,
             format_name=str(metadata.get("format_name") or "backend-api"),
-            metadata=dict(metadata),
+            metadata={**dict(metadata), 'marker_source_version': uuid.uuid4().hex},
         )
         if not bool(metadata.get("time_axis_endpoint", False)):
             dataset.time_axis_ns = np.linspace(0, time_window_ns, matrix.shape[0], endpoint=False, dtype=np.float32)
@@ -813,37 +816,6 @@ class LegacyFieldProjectSession(
             issues=issues,
             repairs=tuple(report.repairs),
             elapsed_ms=report.elapsed_ms,
-        )
-
-    def generate_report(
-        self,
-        *,
-        package_name: str | None,
-        report_profile: Mapping[str, Any],
-        context: ExecutionContext,
-    ) -> ReportPackage:
-        with self._lock:
-            result = generate_project_report_package(
-                self._store,
-                package_name=package_name,
-                report_profile=dict(report_profile),
-                cancel_checker=context.is_cancelled,
-                progress_callback=context.report_progress,
-            )
-        metadata = result.to_dict()
-        metadata["project_root"] = str(self._store.root.resolve())
-        return ReportPackage(
-            package_dir=result.package_dir,
-            manifest_path=result.manifest_path,
-            generated_at=result.generated_at,
-            file_count=result.file_count,
-            pdf_path=result.pdf_path,
-            html_path=result.html_path,
-            xlsx_path=result.xlsx_path,
-            delivery_zip_path=result.delivery_zip_path,
-            delivery_zip_sha256_path=result.delivery_zip_sha256_path,
-            seal_path=result.seal_path,
-            metadata=metadata,
         )
 
     def backup(

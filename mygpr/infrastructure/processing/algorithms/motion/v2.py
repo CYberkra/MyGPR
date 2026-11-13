@@ -105,7 +105,7 @@ def _analyze_trace_quality(
                     warnings,
                     quality_flags,
                     "trace_timestamp_nonmonotonic",
-                    "trace_timestamp_s is not strictly increasing; sidecar interpolation should be reviewed.",
+                    "Trace timestamps repeat or go backward.",
                     nonpositive_step_count=nonpositive,
                     total_step_count=max(trace_count - 1, 0),
                 )
@@ -149,7 +149,7 @@ def _analyze_trace_quality(
                     warnings,
                     quality_flags,
                     "trace_distance_nonmonotonic",
-                    "trace_distance_m is not monotonic; equal-distance resampling and speed estimates should be reviewed.",
+                    "Trace distances go backward, which can affect equal-distance resampling and speed estimates.",
                     negative_step_count=negative,
                     total_step_count=max(trace_count - 1, 0),
                 )
@@ -190,7 +190,7 @@ def _analyze_trace_quality(
                         warnings,
                         quality_flags,
                         "trace_speed_outlier",
-                        "Trace spacing and timestamps imply a large speed outlier; trajectory synchronization should be reviewed.",
+                        "Trace spacing and timestamps imply a speed far above the typical value for this line.",
                         median_speed_mps=median,
                         max_speed_mps=maximum,
                         speed_ratio=ratio,
@@ -469,7 +469,7 @@ def method_motion_compensation_v2(
                 warnings.append(
                     _warning(
                         "low_height_confidence",
-                        "Height confidence is low for part of the line; motion compensation should be reviewed.",
+                        "Some traces have low height confidence, which can reduce motion-compensation accuracy.",
                         low_confidence_trace_count=low_count,
                         total_trace_count=trace_count,
                     )

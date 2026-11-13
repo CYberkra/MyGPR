@@ -67,8 +67,6 @@ ProjectPage = _import_page_class('ui.pages.project_page', 'ProjectPage')
 ProcessingPage = _import_page_class('ui.pages.processing_page', 'ProcessingPage')
 InterpretationPage = _import_page_class('ui.pages.interpretation_page', 'InterpretationPage')
 SpatialPage = _import_page_class('ui.pages.spatial_page', 'SpatialPage')
-DeliveryPage = _import_page_class('ui.pages.delivery_page', 'DeliveryPage')
-JobsPage = _import_page_class('ui.pages.jobs_page', 'JobsPage')
 SettingsPage = _import_page_class('ui.pages.settings_page', 'SettingsPage')
 
 # ------------------------------------------------------------ 控制器（[A3] 提供，缺失为 None）
@@ -249,8 +247,6 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
              NavigationItemPosition.TOP),
             ('spatialInterface', SpatialPage, FIF.GLOBE, '空间信息',
              NavigationItemPosition.TOP),
-            ('deliveryInterface', DeliveryPage, FIF.SEND, '成果', NavigationItemPosition.TOP),
-            ('jobsInterface', JobsPage, FIF.SYNC, '任务', NavigationItemPosition.TOP),
             ('settingsInterface', SettingsPage, FIF.SETTING, '设置',
              NavigationItemPosition.BOTTOM),
         ]
@@ -350,7 +346,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # 写入，触发「dictionary changed size during iteration」（CI Linux
         # offscreen 上表现为 test_main_window_titlebar 偶发 ERROR）。
         self._deferred_specs.clear()
-        # 跨页业务信号链需要 7 页全部存在，因此延后到此处。
+        # 跨页业务信号链需要全部页面就位。
         self.page_coordinator.connect_all()
         tree = getattr(self, '_file_tree_panel', None)
         collapsed_signal = getattr(tree, 'collapsed_changed', None)
@@ -576,8 +572,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             tree_button.setVisible(state != 'startup' and current_name != 'processingInterface')
             tree_button.setEnabled(state != 'startup')
             tree_button.setToolTip('文件树 (Ctrl+B)' if state != 'startup' else '打开项目后可查看项目资源')
-        for key in ('processingInterface', 'interpretationInterface',
-                    'spatialInterface', 'deliveryInterface'):
+        for key in ('processingInterface', 'interpretationInterface', 'spatialInterface'):
             item = nav.items.get(key)
             if item is None:
                 continue
@@ -699,8 +694,6 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             ('Ctrl+3', 'processingInterface', '处理'),
             ('Ctrl+4', 'interpretationInterface', '解释'),
             ('Ctrl+5', 'spatialInterface', '空间信息'),
-            ('Ctrl+6', 'deliveryInterface', '成果'),
-            ('Ctrl+7', 'jobsInterface', '任务'),
             ('Ctrl+8', 'settingsInterface', '设置'),
         ]
         for seq, obj_name, _title in self._page_shortcuts:
@@ -711,6 +704,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             self._panel_toggle = QShortcut(QKeySequence('Ctrl+J'), self)
             self._panel_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
             self._panel_toggle.activated.connect(self.output_panel.toggle_panel)
+            self._show_tasks_shortcut = QShortcut(QKeySequence('Ctrl+7'), self)
+            self._show_tasks_shortcut.activated.connect(self.output_panel.show_jobs)
         self._file_tree_toggle = QShortcut(QKeySequence('Ctrl+B'), self)
         self._file_tree_toggle.setContext(Qt.ShortcutContext.WindowShortcut)
         self._file_tree_toggle.activated.connect(self._toggle_file_tree)

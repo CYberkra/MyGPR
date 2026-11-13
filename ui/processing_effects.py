@@ -98,6 +98,8 @@ def describe_step(step: Mapping) -> StepEffect:
     method_id = str(step.get("method_id") or "未知方法")
     metadata = METHOD_METADATA.get(method_id, {})
     action = _ACTIONS.get(method_id)
+    if method_id == 'trace_range_select':
+        action = {'keep': '保留区间', 'exclude': '剔除区间'}.get((step.get('params') or {}).get('mode'))
     if not action:
         action = str(metadata.get("display_name") or method_id).split("（", 1)[0]
     category_key = str(metadata.get("category") or "experimental")

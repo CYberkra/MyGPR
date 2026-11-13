@@ -31,7 +31,7 @@ def test_unknown_and_cyclic_legacy_edges_are_not_fabricated():
     assert line_node.children, 'lineage and unknown origins need distinct containers'
     assert not line_node.children[0].children
     unknown = line_node.children[1]
-    assert '来源待核对' in unknown.text
+    assert '缺少来源记录' in unknown.text
     assert {n.payload for n in unknown.children} == {'old', 'A', 'B'}
 
 

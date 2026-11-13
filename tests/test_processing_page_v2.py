@@ -512,19 +512,21 @@ class TestCardClose:
 
 
 class TestParamEmptyHint:
-    """参数卡空态：表单无字段时显示引导文案（真机走查遗留项）。"""
+    """The parameter pane only reports missing fields for a selected step."""
 
     def test_hint_toggles_with_form_schema(self, qapp):
         page = ProcessingPage()
         try:
             parent = page._param_empty_hint.parentWidget()
-            assert page._param_empty_hint.isVisibleTo(parent)
+            assert not page._param_empty_hint.isVisibleTo(parent)
             page._methods_by_id['agc'] = {'parameter_schema': [
                 {'name': 'window', 'label': '窗口', 'type': 'int',
                  'default': 5, 'min': 1, 'max': 100}]}
             page._pipeline_list.add_step('agc', 'AGC', {})
             assert not page._param_empty_hint.isVisibleTo(parent)
             page._pipeline_list._list.setCurrentRow(-1)
+            assert not page._param_empty_hint.isVisibleTo(parent)
+            page._pipeline_list.add_step('without_params', '无参数算法', {})
             assert page._param_empty_hint.isVisibleTo(parent)
         finally:
             page.close()
@@ -552,21 +554,22 @@ class TestChainAlternativePaths:
         assert strip._list.count() == 2            # 剩 2 步
         assert [s['label'] for s in strip._steps] == ['a', 'c']
 
-    def test_context_menu_requests_step_editor(self, qapp):
-        """P0-3：右键 chip 不再建菜单——置当前行 + 发 sig_step_editor_requested
-        （合一弹窗唯一入口；启停/排序/复制/替换/删除全在弹窗内完成）。"""
+    def test_context_menu_requires_explicit_step_editor_action(self, qapp):
         strip = ChainStrip()
-        strip.set_steps([{'label': 'a', 'enabled': True},
-                         {'label': 'b', 'enabled': True},
-                         {'label': 'c', 'enabled': True}])
+        strip.set_steps([{'label': '一'}, {'label': '二'}])
+        strip.resize(700, 50)
+        strip.show()
+        qapp.processEvents()
+        strip.select_step(0)
         got = []
         strip.sig_step_editor_requested.connect(got.append)
-        strip.show()                       # 几何需真实布局（rowAt 依赖它）
-        qapp.processEvents()
         rect = strip._list.visualItemRect(strip._list.item(1))
-        strip._on_context_menu(rect.center())
-        assert got == [1]
-        assert strip._list.currentRow() == 1
+        menu = strip._context_menu(rect.center())
+        assert not got and strip._list.currentRow() == 0
+        next(action for action in menu.actions() if action.data() == 'edit-step').trigger()
+        assert got == [1] and strip._list.currentRow() == 0
+        menu.deleteLater()
+        strip.close()
 
     def test_fill_step_menu_removed(self, qapp):
         """旧四动作右键菜单已删除（动作收敛进合一弹窗，不维护两套入口）。"""
@@ -920,6 +923,10 @@ class TestAuditFixes20261009:
         page = ProcessingPage()
         try:
             assert page._autotune_card.is_collapsed() is True
+            page.set_line_label('L01')
+            page.set_original_bundle(_bundle(1))
+            page._pipeline_list.add_step('dewow', '去直流', {'win': 3})
+            page._on_autotune_clicked()
             page.set_autotune_result('dewow', {'best_params': {'win': 5}})
             assert page._autotune_card.is_collapsed() is False
         finally:
@@ -1096,7 +1103,7 @@ class TestDeepAudit20261009:
             strip.deleteLater()
 
     def test_overflow_menu_edit_requests_step_editor(self, qapp):
-        """P0-3：子菜单 = 「选中 / 编辑」两项；「编辑」发合一弹窗信号。"""
+        """An overflow step exposes the same commands as its visible chip."""
         strip = self._strip()
         try:
             strip.set_steps([{'label': f'm{i}', 'enabled': True}
@@ -1105,24 +1112,27 @@ class TestDeepAudit20261009:
             strip.sig_step_editor_requested.connect(got.append)
             menu = strip._build_overflow_menu()
             sub = menu._step_submenus[1]
-            texts = [a.text() for a in sub.actions() if a.text()]
-            assert texts == ['选中', '编辑']
-            sub.actions()[1].trigger()           # 「编辑」→ 合一弹窗
+            commands = {a.data(): a for a in sub.actions() if a.data()}
+            assert set(commands) == {'edit-step', 'toggle-step', 'copy-step', 'move-up',
+                                     'move-down', 'replace-step', 'remove-step'}
+            commands['edit-step'].trigger()
             assert got == [1]
         finally:
             strip.deleteLater()
 
     # ---------------- P2：链空态引导 ----------------
-    def test_empty_chain_shows_hint(self, qapp):
+    def test_empty_chain_shows_add_action(self, qapp):
         strip = self._strip()
         try:
             strip.show()
             strip.set_steps([])
             qapp.processEvents()
-            assert strip._empty_hint.isVisibleTo(strip) is True
+            assert strip._empty_add.isVisibleTo(strip)
+            assert not strip._add_btn.isVisibleTo(strip)
             strip.set_steps([{'label': 'a', 'enabled': True}])
             qapp.processEvents()
-            assert strip._empty_hint.isVisibleTo(strip) is False
+            assert not strip._empty_add.isVisibleTo(strip)
+            assert strip._add_btn.isVisibleTo(strip)
         finally:
             strip.deleteLater()
 
@@ -1142,14 +1152,17 @@ class TestDeepAudit20261009:
         finally:
             page.close()
 
-    def test_run_click_while_running_emits_cancel(self, qapp):
+    def test_running_task_requires_explicit_cancel(self, qapp):
         page = self._page_with_run()
         try:
-            got = []
-            page.cancel_requested.connect(lambda: got.append(True))
+            cancelled, submitted = [], []
+            page.cancel_requested.connect(lambda: cancelled.append(True))
+            page.run_requested.connect(submitted.append)
             page.set_running(True)
             page._on_run_clicked()
-            assert got == [True]
+            assert not submitted and not cancelled
+            page._cancel_btn.click()
+            assert cancelled == [True]
         finally:
             page.close()
 

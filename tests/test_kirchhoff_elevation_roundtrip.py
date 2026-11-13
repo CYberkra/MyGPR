@@ -28,7 +28,8 @@ def test_kirchhoff_elevation_public_pipeline(tmp_path):
         assert axis.shape == (48,) and np.all(np.diff(axis) < 0)
         assert axis[0] == pytest.approx(100.4)
         assert data.header_info['time_axis_status'] == 'unknown'
-        assert data.trace_metadata == {}
+        assert not {key: value for key, value in data.trace_metadata.items() if not key.startswith('_marker_')}
+        assert data.header_info['marker_maps']
         np.testing.assert_allclose(data.header_info['distance_axis_m'], np.linspace(0, 1.4, 16), atol=1e-6)
         info = backend.projects.get_artifact_dataset_info(pid, 'L01', art.artifact_id)
         np.testing.assert_allclose(info.metadata['elevation_axis_m'], axis)

@@ -16,11 +16,21 @@ class SpatialContextMenuMixin:
     def _bind_line_context(self, map_view_key):
         self._line_menu_map_key = map_view_key
         self._line_context = ObjectMenuBinding(self, self._line_list, self._line_menu)
+        self._map_view.add_line_menu_actions = self._add_line_menu_actions
 
     def _line_menu(self, pos):
         menu = object_menu(self)
         item = self._line_list.itemAt(pos)
         line_id = str(item.data(Qt.ItemDataRole.UserRole) or '') if item else ''
+        if line_id:
+            self._add_line_menu_actions(menu, line_id)
+            menu.addSeparator()
+        object_action(menu, 'fit-tracks', '适应全部测线', self._map_view.fit_to_tracks,
+                      enabled=bool(self._tracks) and self._active_view_key() == self._line_menu_map_key,
+                      reason='请先切换有轨迹的平面地图')
+        return menu
+
+    def _add_line_menu_actions(self, menu, line_id):
         track = self._tracks_by_id.get(line_id)
 
         def current_item():
@@ -29,6 +39,7 @@ class SpatialContextMenuMixin:
             return next((self._line_list.item(row) for row in range(self._line_list.count())
                          if self._line_list.item(row).data(Qt.ItemDataRole.UserRole) == line_id), None)
 
+        item = current_item()
         if item is not None:
             object_action(menu, 'set-current', '设为当前测线',
                           lambda: self.current_line_requested.emit(line_id) if current_item() is not None else None)
@@ -44,18 +55,24 @@ class SpatialContextMenuMixin:
             visibility = object_action(menu, 'toggle-visible', '显示测线', toggle)
             visibility.setCheckable(True)
             visibility.setChecked(checked)
-            object_action(menu, 'zoom-line', '缩放到此测线', lambda: None,
-                          enabled=False, reason='当前仅支持全部测线范围')
-            menu.addSeparator()
-        object_action(menu, 'fit-tracks', '适应全部测线', self._map_view.fit_to_tracks,
-                      enabled=bool(self._tracks) and self._active_view_key() == self._line_menu_map_key,
-                      reason='请先切换有轨迹的平面地图')
-        return menu
+            object_action(menu, 'zoom-line', '缩放到此测线',
+                          lambda: self._map_view.fit_to_line(line_id) if current_item() is not None else None,
+                          enabled=self._map_view.can_fit_line(line_id)
+                          and self._active_view_key() == self._line_menu_map_key,
+                          reason='需要平面地图中的有效轨迹')
 
     def _on_set_current_clicked(self) -> None:
         line_id = self._selected_line_id()
         if line_id:
             self.current_line_requested.emit(line_id)
+
+    def _on_prefetch_view_clicked(self):
+        if self._active_view_key() != self._line_menu_map_key or self._map_view.tracks_bbox_lonlat() is None:
+            self._prefetch_label.setText('请先打开包含已配准轨迹的平面地图')
+            return
+        count = self._map_view.prefetch_current_view()
+        self._prefetch_label.setText(f'正在下载 {count} 张瓦片…' if count else '当前视野没有待下载瓦片')
+        self.basemap_prefetch_requested.emit()
 
     def _on_depth_slider_changed(self, value: int) -> None:
         depth_m = value / 100.0

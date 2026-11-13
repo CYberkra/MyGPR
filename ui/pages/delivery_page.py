@@ -1,21 +1,11 @@
 # -*- coding: utf-8 -*-
-"""DeliveryPage — 成果与交付（SPEC §6.7）。
-
-- 卡片1"空间成果"：名称 LineEdit + 测线多选 + PrimaryPushButton('生成空间成果')
-  + 结果表格
-- 卡片2"项目报告"：包名 LineEdit(可空) + PrimaryPushButton('生成报告包')
-  + 结果区（PDF/HTML/Excel/ZIP 路径 + PushButton('打开目录')）
-- 卡片3"备份与恢复"：PushButton('备份当前项目') + PushButton('从备份恢复')
-  （目录/文件选择对话框）
-
-页面纯展示 + 发信号，不直接调 controller/backend。
-"""
+"""Spatial result controls and project-owned report and backup dialogs."""
 
 import os
 import json
 from collections.abc import Mapping
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QItemSelectionModel, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QHBoxLayout, QHeaderView, QListWidget,
@@ -77,6 +67,7 @@ class DeliveryPage(QWidget):
     spatial_export_requested = pyqtSignal(dict)
     spatial_delete_requested = pyqtSignal(str)
     spatial_current_requested = pyqtSignal(str)
+    spatial_locate_requested = pyqtSignal(list)
     report_requested = pyqtSignal(dict)    # {'package_name': str}
     backup_requested = pyqtSignal(dict)    # {'destination_dir': str, 'incremental': bool, 'retention_keep': int|None}
     restore_requested = pyqtSignal(dict)   # archive_path, destination_root, project_dir_name, open_after_restore
@@ -84,7 +75,12 @@ class DeliveryPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._busy = False
+        self._project_owner = self
+        self._read_only = False
+        self._pending_spatial_result = ''
+        self._project_generation = 0
         self._report_dir = ''
+        self._preferred_report_dir = ''
         self._spatial_results = []
         self._spatial_revision = 0
         self._project_root = ''
@@ -111,14 +107,51 @@ class DeliveryPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
-
-        # 三张卡各成一个方法：每张是一组独立交付能力（空间成果 / 报告包 /
-        # 备份恢复），各自有主操作、未就绪门控与空态引导，混在一个方法里
-        # 会让「这张卡有哪些控件」只能靠通读 116 行才看得清。
         self._build_spatial_card(root)
-        self._build_report_card(root)
-        self._build_backup_card(root)
+        self._report_dialog = self._tool_dialog('项目报告', self._build_report_card)
+        self._backup_dialog = self._tool_dialog('备份与恢复', self._build_backup_card)
         root.addStretch(1)
+
+    def _tool_dialog(self, title, build):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(620, 280)
+        build(QVBoxLayout(dialog))
+        return dialog
+
+    def set_project_owner(self, project):
+        self._project_owner = project
+        for dialog in (self._report_dialog, self._backup_dialog):
+            dialog.setParent(project, Qt.WindowType.Dialog)
+
+    def show_report_history(self):
+        self._report_dialog.show()
+        self._report_dialog.raise_()
+
+    def show_backup_tools(self):
+        self._backup_dialog.show()
+        self._backup_dialog.raise_()
+
+    def show_report_config(self):
+        self._on_report_clicked()
+
+    def restore_from_backup(self):
+        self._on_restore_clicked()
+
+    def reset_project(self, root, *, read_only=False):
+        self._project_generation += 1
+        self._pending_spatial_result = ''
+        self._preferred_report_dir = ''
+        self.set_project_root(root)
+        self._read_only = bool(read_only)
+        self.set_spatial_results([])
+        self.set_report_packages([])
+        self.set_report_result(None, notify=False)
+        self.set_lines([])
+        self.set_artifacts([])
+        self.set_busy(False)
+        self._report_dialog.hide()
+        self._backup_dialog.hide()
 
     def _build_spatial_card(self, root: QVBoxLayout) -> None:
         """卡片1：空间成果（主操作进卡头行，P2-3）。"""
@@ -162,10 +195,39 @@ class DeliveryPage(QWidget):
         self._spatial_table.horizontalHeader().setSectionResizeMode(
             3, QHeaderView.ResizeMode.ResizeToContents)
         self._spatial_table.setMinimumHeight(140)
+        self._spatial_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._spatial_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._spatial_table.cellDoubleClicked.connect(self._on_spatial_double_clicked)
         spatial_layout.addWidget(self._spatial_table)
         self._spatial_empty = EmptyStateOverlay(
             self._spatial_table, icon=FIF.SEND, title='暂无空间成果')
+        actions = QHBoxLayout()
+        self._locate_btn = PushButton('定位测线', spatial_card)
+        self._export_btn = PushButton('导出…', spatial_card)
+        self._locate_btn.clicked.connect(lambda: self.focus_spatial_result(self._selected_spatial_id(), locate=True))
+        self._export_btn.clicked.connect(lambda: self._export_spatial_result(self._selected_spatial_id()))
+        actions.addWidget(self._locate_btn)
+        actions.addWidget(self._export_btn)
+        spatial_layout.addLayout(actions)
+        self._spatial_table.itemSelectionChanged.connect(self._sync_spatial_actions)
+        self._sync_spatial_actions()
         root.addWidget(spatial_card)
+
+    def compact_spatial_table(self):
+        self._spatial_table.hideColumn(1)
+        self._spatial_table.hideColumn(2)
+        self._spatial_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
+        self._spatial_table.setColumnWidth(3, 92)
+
+    def _selected_spatial_id(self):
+        row = self._spatial_table.currentRow()
+        item = self._spatial_table.item(row, 0)
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None and item.isSelected() else ''
+
+    def _sync_spatial_actions(self):
+        enabled = bool(self._selected_spatial_id())
+        self._locate_btn.setEnabled(enabled)
+        self._export_btn.setEnabled(enabled)
 
     def _build_report_card(self, root: QVBoxLayout) -> None:
         """卡片2：项目报告（主操作进卡头行，P2-3）。"""
@@ -227,7 +289,7 @@ class DeliveryPage(QWidget):
         self._retention_spin.setRange(1, 100)
         self._retention_spin.setValue(10)
         self._retention_spin.setToolTip(
-            '保留最近指定数量的恢复点及其必需增量祖先；实际 ZIP 档案数量可能超过该数量。')
+            '同时保留恢复所需的旧备份')
         options_row.addWidget(self._retention_spin)
         options_row.addWidget(CaptionLabel('个恢复点'))
         options_row.addStretch(1)
@@ -252,11 +314,18 @@ class DeliveryPage(QWidget):
         results = list(results or [])
         self._spatial_context.close()
         self._spatial_revision += 1
+        selected = self._pending_spatial_result
+        if not selected and self._spatial_table.currentRow() >= 0:
+            item = self._spatial_table.item(self._spatial_table.currentRow(), 0)
+            selected = item.data(Qt.ItemDataRole.UserRole) if item else ''
         self._spatial_results = results
         self._spatial_empty.setVisible(not results)
         self._spatial_table.setRowCount(len(results))
         for row, item in enumerate(results):
             name = str(_get(item, 'name', '') or _get(item, 'title', ''))
+            version = _get(item, 'revision')
+            if version:
+                name += f' · v{version}'
             line_ids = _get(item, 'line_ids', None)
             if line_ids is None:
                 n_lines = _get(item, 'line_count', 0)
@@ -264,7 +333,9 @@ class DeliveryPage(QWidget):
                 n_lines = len(line_ids)
             created = str(_get(item, 'created_at', '')
                           or _get(item, 'created', '') or '--')
-            self._spatial_table.setItem(row, 0, QTableWidgetItem(name))
+            name_item = QTableWidgetItem(name)
+            name_item.setToolTip(f'{name}\n{n_lines} 条测线 · {created}')
+            self._spatial_table.setItem(row, 0, name_item)
             self._spatial_table.setItem(row, 1, QTableWidgetItem(str(n_lines)))
             self._spatial_table.setItem(row, 2, QTableWidgetItem(created))
             status = str(_get(item, 'status', '') or '')
@@ -278,10 +349,37 @@ class DeliveryPage(QWidget):
             if options.get('surface_generated') is False or (files and 'surface_mesh' not in files):
                 text += ' · 未生成曲面'
             status_item = QTableWidgetItem(text)
-            status_item.setToolTip('\n'.join(map(str, warnings)))
+            status_item.setToolTip('\n'.join([text, *map(str, warnings)]))
             self._spatial_table.setItem(row, 3, status_item)
             self._spatial_table.item(row, 0).setData(
                 Qt.ItemDataRole.UserRole, str(_get(item, 'result_id', '') or _get(item, 'artifact_id', '')))
+
+        if selected:
+            self.focus_spatial_result(selected, locate=bool(self._pending_spatial_result and self.isVisible()))
+        self._sync_spatial_actions()
+
+    def select_when_available(self, result_id):
+        self._pending_spatial_result = str(result_id)
+        self.focus_spatial_result(result_id, locate=self.isVisible())
+
+    def focus_spatial_result(self, result_id, *, locate=False):
+        for row, result in enumerate(self._spatial_results):
+            item = self._spatial_table.item(row, 0)
+            if item.data(Qt.ItemDataRole.UserRole) == result_id:
+                flags = QItemSelectionModel.SelectionFlag
+                self._spatial_table.setCurrentCell(row, 0, flags.ClearAndSelect | flags.Rows)
+                self._spatial_table.scrollToItem(item)
+                if self._pending_spatial_result == result_id:
+                    self._pending_spatial_result = ''
+                if locate:
+                    self.spatial_locate_requested.emit(list(_get(result, 'line_ids', ()) or ()))
+                return True
+        return False
+
+    def _on_spatial_double_clicked(self, row, _column):
+        item = self._spatial_table.item(row, 0)
+        if item is not None:
+            self.focus_spatial_result(item.data(Qt.ItemDataRole.UserRole), locate=True)
 
     def _spatial_result_menu(self, pos):
         menu = object_menu(self)
@@ -311,9 +409,12 @@ class DeliveryPage(QWidget):
         object_action(menu, 'copy-name', '复制成果名称',
                       lambda: QApplication.clipboard().setText(str(_get(result, 'name', ''))) if valid() else None)
         menu.addSeparator()
+        object_action(menu, 'locate-result', '在地图定位测线',
+                      lambda: self.focus_spatial_result(result_id, locate=True) if valid() else None,
+                      enabled=bool(result_id and _get(result, 'line_ids', ())))
         object_action(menu, 'set-current-result', '设为当前空间成果',
                       lambda: self.spatial_current_requested.emit(result_id) if valid() else None,
-                      enabled=bool(result_id))
+                      enabled=bool(result_id and not self._busy and not self._read_only))
         object_action(menu, 'open-result', '打开成果目录',
                       lambda: self._open_spatial_result(result_id) if valid() else None,
                       enabled=bool(result_id and self._project_root))
@@ -322,7 +423,7 @@ class DeliveryPage(QWidget):
                       enabled=bool(result_id))
         object_action(menu, 'delete-result', '永久删除空间成果…',
                       lambda: self._delete_spatial_result(result_id) if valid() else None,
-                      enabled=bool(result_id and not self._busy))
+                      enabled=bool(result_id and not self._busy and not self._read_only))
         return menu
 
     def set_project_root(self, root):
@@ -334,9 +435,12 @@ class DeliveryPage(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def _export_spatial_result(self, result_id):
+        if not result_id:
+            return
         from ui.dialogs import choose_spatial_export_path
+        generation = self._project_generation
         path, format_name = choose_spatial_export_path(self, result_id)
-        if path:
+        if path and generation == self._project_generation:
             self.spatial_export_requested.emit({
                 'result_id': result_id,
                 'destination': path,
@@ -364,23 +468,37 @@ class DeliveryPage(QWidget):
         self._artifacts = list(artifacts or [])
 
     def set_report_packages(self, packages):
-        current = self._report_history_combo.currentData()
+        current = self._preferred_report_dir or self._report_history_combo.currentData()
         self._report_packages = list(packages or [])
         self._report_history_combo.blockSignals(True)
         self._report_history_combo.clear()
         for index, package in enumerate(self._report_packages):
             directory = str(_get(package, 'package_dir', ''))
             label = os.path.basename(directory.rstrip('/\\')) or str(_get(package, 'package_name', '')) or f'报告 {index + 1}'
-            self._report_history_combo.addItem(label, userData=index)
+            self._report_history_combo.addItem(label, userData=_report_output_path(package, 'package_dir'))
         restored = self._report_history_combo.findData(current)
         self._report_history_combo.setCurrentIndex(restored if restored >= 0 else 0)
         self._report_history_combo.blockSignals(False)
         if self._report_packages and self._report_history_combo.currentIndex() >= 0:
             self._on_report_history_selected(self._report_history_combo.currentIndex())
+        if restored >= 0:
+            self._preferred_report_dir = ''
 
     def _on_report_history_selected(self, index):
         if 0 <= index < len(self._report_packages):
             self.set_report_result(self._report_packages[index], notify=False)
+
+    def open_report(self, directory):
+        package = next((item for item in self._report_packages
+                        if str(_get(item, 'package_dir')) == directory), None)
+        if package is None:
+            return False
+        for key in ('pdf_path', 'html_path', 'package_dir'):
+            path = _report_output_path(package, key)
+            if path and os.path.isabs(path) and os.path.exists(path):
+                if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+                    return True
+        return False
 
     def set_report_result(self, result, *, notify=True) -> None:
         """报告包结果（dict 或 ReportPackage 对象）→ 结果区路径 + 打开目录。"""
@@ -409,22 +527,24 @@ class DeliveryPage(QWidget):
         self._open_dir_btn.setToolTip(
             '打开报告包输出目录' if report_dir else '生成报告包后可用')
         if has_path and notify:
+            self._preferred_report_dir = report_dir
             InfoBar.success(title='项目报告', content='报告包已生成',
                             orient=Qt.Orientation.Horizontal, isClosable=True,
                             position=InfoBarPosition.TOP, duration=2000,
-                            parent=self)
+                            parent=self._project_owner)
 
     def set_busy(self, busy: bool) -> None:
         """忙态：禁用全部操作按钮。"""
         self._busy = bool(busy)
-        for btn in (self._report_btn, self._backup_btn, self._restore_btn):
-            btn.setEnabled(not self._busy)
+        for btn in (self._report_btn, self._backup_btn):
+            btn.setEnabled(not self._busy and not self._read_only)
+        self._restore_btn.setEnabled(not self._busy)
         self._update_spatial_btn_enabled()
 
     def _update_spatial_btn_enabled(self) -> None:
         """「生成空间成果」双门控：非忙态且有可选测线（P2-3 未就绪禁用）。"""
         self._spatial_btn.setEnabled(
-            not self._busy and self._lines_list.count() > 0)
+            not self._busy and not self._read_only and self._lines_list.count() > 0)
 
     def selected_line_ids(self) -> list:
         """当前勾选的测线 id 列表。"""
@@ -463,7 +583,7 @@ class DeliveryPage(QWidget):
 
     # ============================================================ 内部逻辑
     def _on_spatial_clicked(self) -> None:
-        if self._busy:
+        if self._busy or self._read_only:
             return
         ok, msg = validate_non_empty(self._spatial_name_edit.text(),
                                      '成果名称')
@@ -486,13 +606,14 @@ class DeliveryPage(QWidget):
             {'name': self.spatial_name(), 'line_ids': line_ids})
 
     def _on_report_clicked(self) -> None:
-        if self._busy:
+        if self._busy or self._read_only:
             return
         from ui.pages.report_config import ReportConfigDialog
+        generation = self._project_generation
         dialog = ReportConfigDialog(
-            self._line_records, self._artifacts, self._spatial_results, self)
+            self._line_records, self._artifacts, self._spatial_results, self._project_owner)
         dialog._package_name.setText(self.report_name())
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted and generation == self._project_generation:
             payload = dialog.payload()
             self._report_name_edit.setText(payload['package_name'])
             self.report_requested.emit(payload)
@@ -502,10 +623,10 @@ class DeliveryPage(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(self._report_dir))
 
     def _on_backup_clicked(self) -> None:
-        if self._busy:
+        if self._busy or self._read_only:
             return
         dest = file_dialogs.getExistingDirectory(
-            self, '选择备份目录', constants.DEFAULT_PROJECT_ROOT)
+            self._backup_dialog, '选择备份目录', constants.DEFAULT_PROJECT_ROOT)
         if dest:
             self.backup_requested.emit({
                 'destination_dir': dest,
@@ -516,13 +637,14 @@ class DeliveryPage(QWidget):
     def _on_restore_clicked(self) -> None:
         if self._busy:
             return
+        owner = self._backup_dialog if self._backup_dialog.isVisible() else self._project_owner
         path, _selected_filter = file_dialogs.getOpenFileName(
-            self, '选择备份归档', constants.DEFAULT_PROJECT_ROOT,
+            owner, '选择备份归档', constants.DEFAULT_PROJECT_ROOT,
             '备份归档 (*.zip *.tar *.tar.gz *.tgz);;所有文件 (*)')
         if not path:
             return
         destination = file_dialogs.getExistingDirectory(
-            self, '选择恢复后的新项目父目录（不会覆盖当前项目）', constants.DEFAULT_PROJECT_ROOT)
+            owner, '选择恢复后的新项目父目录（不会覆盖当前项目）', constants.DEFAULT_PROJECT_ROOT)
         if not destination:
             return
         project_dir_name = self._restore_name_edit.text().strip()
@@ -531,7 +653,7 @@ class DeliveryPage(QWidget):
             f'备份归档：\n{path}\n\n恢复位置：\n{destination}\n\n'
             f'项目目录名：{project_dir_name or "自动命名"}\n'
             '此操作恢复为新项目，不覆盖当前项目。确认继续？',
-            self,
+            owner,
         )
         box.yesButton.setText('恢复为新项目')
         box.cancelButton.setText('取消')

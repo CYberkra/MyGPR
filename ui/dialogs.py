@@ -265,7 +265,7 @@ def ask_line_properties(parent, line):
     form.addRow("输入方式", mode)
     form.addRow("实测值", value)
     form.addRow("时间轴", time_known)
-    form.addRow("首末采样跨度 (ns)", time_value)
+    form.addRow("采集时窗（ns）", time_value)
     form.addRow("查看方向", direction)
     box.viewLayout.addLayout(form)
     note = BodyLabel("补录参数用于原始输入和后续处理；已有成果保留原参数。", box)

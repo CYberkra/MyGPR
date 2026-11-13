@@ -61,18 +61,28 @@ class JobTable(QWidget):
     cancel_requested = pyqtSignal(str)
     # 行数/状态变化（宿主据此同步「清理已完成」的可用态：空表点了没反应）
     rows_changed = pyqtSignal()
+    action_requested = pyqtSignal(str)
 
     _COL_TITLE, _COL_STATUS, _COL_PROGRESS, _COL_MESSAGE, _COL_ACTION = range(5)
 
     def finished_count(self) -> int:
         """终态（非活动）任务行数。"""
-        return sum(1 for row in self._rows.values()
-                   if self._status_of(row) not in _ACTIVE_STATUSES)
+        return sum(self._is_prunable(job_id, row) for job_id, row in self._rows.items())
+
+    def _is_prunable(self, job_id, row):
+        batch = self._parent_batch.get(job_id)
+        return (self._status_of(row) not in _ACTIVE_STATUSES and
+                (batch is None or self._status_of(self._rows[batch]) not in _ACTIVE_STATUSES))
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows = {}     # job_id -> row index
         self._badges = {}   # job_id -> 状态徽章 QLabel（复用，不重建）
+        self._statuses = None
+        self._actions = {}
+        self._batches = {}
+        self._parent_batch = {}
+        self._expanded_batches = set()
 
         self._table = QTableWidget(0, 5, self)
         self._table.setHorizontalHeaderLabels(
@@ -102,8 +112,31 @@ class JobTable(QWidget):
         layout.addLayout(self._stack)
 
     def _update_empty_state(self) -> None:
-        """无任务时显示空态占位。"""
-        self._stack.setCurrentIndex(0 if not self._rows else 1)
+        status_messages = {
+            ('queued', 'running', 'failed'): '没有排队、运行中或失败的任务',
+            ('completed', 'cancelled', 'failed'): '无已结束任务',
+        }
+        filtered = status_messages.get(tuple(self._statuses or ()), '无匹配任务')
+        self._empty_label.setText(filtered if self._rows and self._statuses is not None else '暂无任务')
+        self._stack.setCurrentIndex(int(any(not self._table.isRowHidden(row)
+                                            for row in self._rows.values())))
+
+    def status_count(self, *statuses) -> int:
+        return sum(self._status_of(row) in statuses for job_id, row in self._rows.items()
+                   if job_id not in self._batches)
+
+    def set_visible_statuses(self, statuses) -> None:
+        self._statuses = statuses
+        self._refresh_rows()
+
+    def _refresh_rows(self) -> None:
+        for job_id, row in self._rows.items():
+            batch = self._parent_batch.get(job_id)
+            scope = self._rows[batch] if batch is not None else row
+            hidden = (batch is not None and batch not in self._expanded_batches
+                      or self._statuses is not None and self._status_of(scope) not in self._statuses)
+            self._table.setRowHidden(row, hidden)
+        self._update_empty_state()
 
     def apply_theme(self, dark: bool) -> None:
         """主题切换：徽章配色按新主题重刷（空态 HintLabel 自刷，主窗口遍历调用）。"""
@@ -111,16 +144,18 @@ class JobTable(QWidget):
             _restyle_status_badge(badge, self._status_of(self._rows[job_id]))
 
     # ------------------------------------------------------------- 接口
-    def upsert_job(self, job_id: str, title: str) -> None:
+    def upsert_job(self, job_id: str, title: str, *, before=None) -> None:
         if job_id in self._rows:
             self._table.item(self._rows[job_id], self._COL_TITLE).setText(title)
             return
-        row = self._table.rowCount()
+        row = self._table.rowCount() if before is None else self._rows[before]
         self._table.insertRow(row)
+        if before is not None:
+            self._rows = {key: index + int(index >= row) for key, index in self._rows.items()}
         self._rows[job_id] = row
-        self._table.setItem(row, self._COL_TITLE, QTableWidgetItem(title))
-        self._update_empty_state()
-
+        title_item = QTableWidgetItem(title)
+        title_item.setToolTip(title)
+        self._table.setItem(row, self._COL_TITLE, title_item)
         badge = _make_status_badge('queued')
         holder = QWidget(self._table)
         lay = QHBoxLayout(holder)
@@ -140,9 +175,10 @@ class JobTable(QWidget):
         self._table.setItem(row, self._COL_MESSAGE, QTableWidgetItem(''))
         cancel_btn = PushButton('取消', self._table)
         cancel_btn.clicked.connect(
-            lambda _checked=False, jid=job_id: self.cancel_requested.emit(jid))
+            lambda _checked=False, jid=job_id: self.activate_job(jid))
         self._table.setCellWidget(row, self._COL_ACTION, cancel_btn)
         self._badges[job_id] = badge
+        self._refresh_rows()
         self.rows_changed.emit()
 
     def update_progress(self, job_id: str, completed: int, total: int,
@@ -159,6 +195,7 @@ class JobTable(QWidget):
             animate_progress(bar, int(completed))
         bar.setVisible(True)
         self._table.item(row, self._COL_MESSAGE).setText(message or '')
+        self._table.item(row, self._COL_MESSAGE).setToolTip(message or '')
 
     def set_status(self, job_id: str, status: str) -> None:
         row = self._rows.get(job_id)
@@ -178,9 +215,64 @@ class JobTable(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, status)
         bar = self._table.cellWidget(row, self._COL_PROGRESS)
         bar.setVisible(status == 'running')
-        cancel_btn = self._table.cellWidget(row, self._COL_ACTION)
-        cancel_btn.setEnabled(status in _ACTIVE_STATUSES)
+        self._sync_action(job_id)
+        if job_id in self._parent_batch:
+            self._update_batch(self._parent_batch[job_id])
+        self._refresh_rows()
         self.rows_changed.emit()
+
+    def set_job_action(self, job_id: str, label: str) -> None:
+        if job_id in self._rows:
+            self._actions[job_id] = label
+            self._sync_action(job_id)
+
+    def _sync_action(self, job_id):
+        row = self._rows[job_id]
+        active = self._status_of(row) in _ACTIVE_STATUSES
+        if job_id in self._batches:
+            label = '收起测线' if job_id in self._expanded_batches else '查看测线'
+        else:
+            label = '取消' if active else self._actions.get(job_id, '')
+        button = self._table.cellWidget(row, self._COL_ACTION)
+        button.setText(label)
+        button.setVisible(bool(label))
+        button.setEnabled(bool(label))
+
+    def activate_job(self, job_id):
+        if job_id in self._batches:
+            self._expanded_batches.symmetric_difference_update({job_id})
+            self._sync_action(job_id)
+            self._refresh_rows()
+        elif self.can_cancel(job_id):
+            self.cancel_job(job_id)
+        elif job_id in self._rows and self._actions.get(job_id):
+            self.action_requested.emit(job_id)
+
+    def add_batch(self, batch_id, job_ids):
+        members = tuple(job_id for job_id in job_ids if job_id in self._rows)
+        if not members:
+            return
+        self._batches[batch_id] = members
+        self._parent_batch.update(dict.fromkeys(members, batch_id))
+        before = min(members, key=self._rows.__getitem__)
+        self.upsert_job(batch_id, f'批量处理 · {len(members)} 条测线', before=before)
+        self._update_batch(batch_id)
+
+    def _update_batch(self, batch_id):
+        members = self._batches[batch_id]
+        statuses = [self._status_of(self._rows[job_id]) for job_id in members]
+        active = sum(status in _ACTIVE_STATUSES for status in statuses)
+        failed = statuses.count('failed')
+        done = len(members) - active
+        counts = [f'{statuses.count("completed")} 成功']
+        if failed:
+            counts.append(f'{failed} 失败')
+        if 'cancelled' in statuses:
+            counts.append(f'{statuses.count("cancelled")} 已取消')
+        status = next(state for state in ('running', 'queued', 'failed', 'completed', 'cancelled')
+                      if state in statuses)
+        self.update_progress(batch_id, done, len(members), ' · '.join(counts))
+        self.set_status(batch_id, status)
 
     def clear_finished(self) -> None:
         """移除终态行（供"清理已完成"按钮）。
@@ -191,7 +283,7 @@ class JobTable(QWidget):
         """
         finished = sorted(
             ((job_id, row) for job_id, row in self._rows.items()
-             if self._status_of(row) not in _ACTIVE_STATUSES),
+             if self._is_prunable(job_id, row)),
             key=lambda pair: pair[1], reverse=True)
         if not finished:
             return
@@ -199,11 +291,15 @@ class JobTable(QWidget):
             self._table.removeRow(row)
             self._rows.pop(job_id, None)
             self._badges.pop(job_id, None)
+            self._actions.pop(job_id, None)
+            self._batches.pop(job_id, None)
+            self._parent_batch.pop(job_id, None)
+            self._expanded_batches.discard(job_id)
         # 删除后幸存行的相对顺序不变，按旧行号升序重排即为新行号
         survivors = sorted(self._rows.items(), key=lambda kv: kv[1])
         self._rows = {job_id: index for index, (job_id, _old) in
                       enumerate(survivors)}
-        self._update_empty_state()
+        self._refresh_rows()
         self.rows_changed.emit()
 
     def remove_inactive(self) -> None:
@@ -222,19 +318,18 @@ class JobTable(QWidget):
             return {}
         title = self._table.item(row, self._COL_TITLE)
         message = self._table.item(row, self._COL_MESSAGE)
+        status = str(self._status_of(row) or '')
         return {
             'job_id': job_id,
             'title': title.text() if title is not None else '',
             'message': message.text() if message is not None else '',
-            'status': str(self._status_of(row) or ''),
+            'status': status,
+            'status_text': _STATUS_TEXT.get(status, status),
         }
 
     def can_cancel(self, job_id: str) -> bool:
         row = self._rows.get(job_id)
-        if row is None:
-            return False
-        button = self._table.cellWidget(row, self._COL_ACTION)
-        return bool(button and button.isEnabled())
+        return row is not None and job_id not in self._batches and self._status_of(row) in _ACTIVE_STATUSES
 
     def cancel_job(self, job_id: str) -> None:
         if self.can_cancel(job_id):

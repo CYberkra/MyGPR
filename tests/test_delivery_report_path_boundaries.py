@@ -49,6 +49,31 @@ def test_delivery_preserves_absolute_legacy_paths(qapp, tmp_path):
         page.deleteLater()
 
 
+def test_open_historical_report_uses_exact_selected_package(qapp, tmp_path):
+    from ui.pages.delivery_page import DeliveryPage
+
+    first = tmp_path / 'reports' / 'first'
+    second = tmp_path / 'reports' / 'second'
+    first.mkdir(parents=True)
+    second.mkdir()
+    document = first / 'report.pdf'
+    document.write_bytes(b'test PDF path')
+    page = DeliveryPage()
+    try:
+        page.set_report_packages([
+            {'package_dir': 'reports/second', 'metadata': {'project_root': str(tmp_path)}},
+            {'package_dir': 'reports/first', 'pdf_path': 'reports/first/report.pdf',
+             'metadata': {'project_root': str(tmp_path)}},
+        ])
+        with patch('ui.pages.delivery_page.QDesktopServices.openUrl', return_value=True) as opened:
+            assert page.open_report('reports/first')
+            assert Path(opened.call_args.args[0].toLocalFile()) == document
+            assert not page.open_report('reports/missing')
+            assert opened.call_count == 1
+    finally:
+        page.deleteLater()
+
+
 def test_delivery_resolves_relative_file_only_legacy_result(qapp, tmp_path):
     from ui.pages.delivery_page import DeliveryPage
 

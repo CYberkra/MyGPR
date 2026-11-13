@@ -39,7 +39,7 @@ from qfluentwidgets import FluentIcon as FIF
 from qfluentwidgets import isDarkTheme
 
 from ui.desktop_backend_facade import tile_cache_dir
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action, bind_menu_keys, make_menu, show_menu
 from ui.widgets.empty_state import EmptyStateOverlay
 from ui.widgets.local_dem import dem_covers_bbox
 from ui.widgets.map_tiles import (TILE_SOURCE_MAX_ZOOM, WORLD_SIZE_M,
@@ -387,6 +387,8 @@ class Trajectory3DView(QWidget):
         self._theme_dark = bool(isDarkTheme())
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._menu_shortcuts = bind_menu_keys(self, self._show_context_menu)
         # 空态引导浮层：无测线时覆盖容器，set_tracks 有数据即隐藏。
         # 先于 GL 视图创建（惰性），故 host = self；位于降级 QLabel 之上。
         self._empty_overlay = EmptyStateOverlay(
@@ -634,7 +636,7 @@ class Trajectory3DView(QWidget):
         _, vec = _gl_state()
         self._gl_view.opts['center'] = vec(0.0, 0.0, 0.0)
 
-    def _show_context_menu(self, pos) -> None:
+    def _show_context_menu(self, pos=None) -> None:
         if not self._ensure_gl_view():
             return
         from qfluentwidgets import Action
@@ -658,7 +660,7 @@ class Trajectory3DView(QWidget):
         menu.addAction(grid_action)
         menu.addSeparator()
         add_action(menu, FIF.SAVE, '导出截图 PNG…', self._export_screenshot)
-        menu.exec(self.mapToGlobal(pos))
+        show_menu(menu, self.mapToGlobal(pos if pos is not None else self.rect().center()))
 
     def _set_camera_preset(self, preset: str) -> None:
         """视角预设：顶视 / 斜视 45° / 侧视（距离与中心保持不动）。"""

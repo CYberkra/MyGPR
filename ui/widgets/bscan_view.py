@@ -62,13 +62,14 @@ from ui.widgets.bscan_view_interaction import (BScanDisplayMode,
 from ui.widgets.bscan_view_interaction import (format_crosshair_readout
                                                as format_crosshair_readout)
 from ui.widgets.empty_state import EmptyStateOverlay
-from ui.widgets.marker_pins import MAX_MARKERS as MARKER_RENDER_LIMIT
+from ui.widgets.bscan_marker_events import BScanMarkerEventsMixin
+from ui.widgets.context_menus import bind_menu_keys
 from ui.widgets.marker_pins import MarkerPins
 from ui.widgets.pg_view_base import GraphicsViewBase, style_plot_item
 
 
 
-class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
+class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMixin, BScanViewDataMixin, BScanViewInteractionMixin, GraphicsViewBase, QWidget):
     """B-Scan 剖面图像视图。
 
     缩放/导出/轴主题继承 GraphicsViewBase（pg_view_base）；
@@ -82,6 +83,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         sig_colormap_changed(str): 右键菜单切换色标时发射（宿主写回设置用）。
     """
 
+    sig_marker_context_changed = pyqtSignal()
+    sig_event_marker_selected = pyqtSignal(str)
     sig_point_picked = pyqtSignal(int, int)
     sig_colormap_changed = pyqtSignal(str)
     # 用户手动切换显示比例时发射（'free'/'square'/'cell'），页面据此持久化
@@ -107,6 +110,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
                  default_y_axis: str = 'sample',
                  default_levels: tuple | None = None):
         super().__init__(parent)
+        self._canvas_menu_sections = []
+        self._view_menu = None
         self._view_time_window = None
         self._view_selection = None
         self._selection_follows_levels = True
@@ -150,9 +155,9 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._gain_cache = None
         self._envelope_cache = None
         self._contrast = 1.0
-        self._tvg_dialog = None     # 滑条面板（懒创建，随视图销毁）
         # 全屏宿主（懒创建）+ 几何持久化回调（主窗口注入，避免 view 碰文件）
         self._fullscreen = None
+        self._thumbnail_mode = False
         self._geometry_loader = None
         self._geometry_saver = None
         # A-scan 波形跟随浮窗（懒创建；Phase1 1.1）
@@ -271,7 +276,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         - 截短：**title 会参与 PlotItem 布局的列最小宽**（实测每字符
           ~4px @8pt），长成果名会把右侧色标列推出视口（444px 卡上
           30 字符即出界，实探针）；截到 20 字符（保头尾，中略）后
-          窄栏双图也稳。空标题时 pyqtgraph 自动隐藏。
+          窄栏双图也稳。调用方将空标题传为 None 以收起标题行。
         """
         text = str(title or '')
         if not text:
@@ -314,20 +319,21 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         """
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(self._glw, 1)
 
         # 采集标记箭头：挂在 _glw 里的透明浮层，几何严格跟随 ViewBox。
         # 不参与布局，控件与绘图区高度零增量（2026-11-11 替代图内贴顶散点）
         self._marker_pins = MarkerPins(self._glw, self._plot, self._glw)
         self._marker_pins.sig_selection_changed.connect(self._on_marker_selected)
+        self.init_marker_events(layout)
 
         self._fullscreen_btn = ToolButton(FIF.FULL_SCREEN, self)
         self._fullscreen_btn.setToolTip('全屏：在独立窗口中展开（Esc 退出）')
         self._fullscreen_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        self._fullscreen_btn.move(max(6, self.width() - self._fullscreen_btn.width() - 10), 10)
-        self._fullscreen_btn.raise_()
-        self._fullscreen_btn.show()
+        self._plot.vb.sigResized.connect(self._layout_fullscreen_controls)
+        self._layout_fullscreen_controls()
         self._qc_marks_action = Action('显示异常道标记', self)
         self._qc_marks_action.setObjectName('showAnomalousTraceMarks')
         self._qc_marks_action.setCheckable(True)
@@ -337,6 +343,8 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._fullscreen_shortcut = QShortcut(QKeySequence('F11'), self)
         self._fullscreen_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._fullscreen_shortcut.activated.connect(self.toggle_fullscreen)
+        self._glw.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._canvas_shortcuts = bind_menu_keys(self._glw, self.show_canvas_menu)
 
     # ------------------------------------------------------------------ 轴单位
     def x_axis_mode(self) -> str:
@@ -422,6 +430,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         """按当前单位刷新显示矩阵、轴标签与刻度文本（切换/来数据共用）。"""
         swapped = self._refresh_elevation_image()
         self._plot.setLabel('bottom', self._bottom_label())
+        self.marker_strip.sync_axis_title()
         self._plot.setLabel('left', self._left_label())
         self._refresh_axis_state()
         if swapped:
@@ -514,7 +523,15 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         return self._glw
 
     def _fit_view(self) -> None:
-        self.fit_to_data()
+        self.fit_all()
+
+    def fit_all(self) -> None:
+        """Restore the full viewport with its current display aspect policy."""
+        if self._image_shape is None:
+            return
+        self._clear_view_selection()
+        self._fit_current_mode()
+        self._apply_levels_to_render()
 
     def aspect_mode(self) -> str:
         """当前比例策略：'free' / 'square' / 'cell'。"""
@@ -540,7 +557,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
             self._clear_view_selection()
         self._aspect_mode = 'free'
         self._plot.vb.setAspectLocked(False)
-        self._plot.vb.autoRange()
+        self._plot.vb.autoRange(padding=0)
         if notify:
             self._apply_levels_to_render()
             self.sig_aspect_changed.emit('free')
@@ -608,7 +625,9 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
             self._colorbar.setVisible(visible and self._colorbar_visible)
 
     def clear(self) -> None:
+        self._close_view_menu()
         self.set_acquisition_markers(())
+        self.set_marker_view(None)
         self.set_qc_bad_mask(None)
         self.set_qc_local_mask(None)
         self._clear_view_selection()
@@ -627,13 +646,22 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._hide_crosshair()
         # 空态引导浮层（评审 P0-1）：替代原"只剩坐标轴 + 图内标题文案"
         self._export_title = ''
-        self._plot.setTitle('')
+        self._plot.setTitle(None)
         self._refresh_axis_state()
         self._empty_overlay.setVisible(True)
         self._set_axes_visible(False)
 
     def set_acquisition_markers_visible(self, visible: bool) -> None:
         self._acquisition_markers_visible = bool(visible)
+        for guide in self._event_guides:
+            guide.setVisible(self._acquisition_markers_visible)
+        if self._marker_view is not None:
+            if visible:
+                self.marker_strip.refresh_visibility()
+            else:
+                self.marker_strip.cancel_edit()
+            self._marker_pins.hide()
+            return
         self._marker_pins.setVisible(
             self._acquisition_markers_available and self._acquisition_markers_visible)
 
@@ -651,7 +679,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         records, positions = [], []
         if len(grid):
             columns = np.arange(len(grid))
-            for mark in (markers or ())[:MARKER_RENDER_LIMIT]:
+            for mark in (markers or ()):
                 row = int(mark['trace_no'])
                 records.append({
                     'trace_no': row,
@@ -700,17 +728,19 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
         self._sync_ascan_to_marker(int(x))
 
     def _reveal_marker(self, x: float) -> None:
-        """把选中的道带进视野中央：只平移、不改缩放。
-
-        已经在中央 60% 区间时不动，避免点一下就无端滑图；标记在视野外
-        或贴着边缘时才会平移（标准 scroll-into-view 行为）。
-        """
+        """Bring an offscreen trace into the viewport without blank margins."""
+        if self._image_shape is None:
+            return
         vb = self._plot.vb
         xmin, xmax = vb.viewRange()[0]
         width = xmax - xmin
-        if width <= 0 or abs(x - (xmin + xmax) / 2.0) <= width * 0.30:
+        if width <= 0 or xmin <= x <= xmax:
             return
-        vb.setXRange(x - width / 2.0, x + width / 2.0, padding=0.0)
+        traces = self._image_shape[0]
+        if not 0 <= x <= traces:
+            return
+        left = min(max(0., x - width / 2), max(0., traces - width))
+        vb.setXRange(left, left + width, padding=0.)
 
     def _sync_ascan_to_marker(self, display_trace: int) -> None:
         """A-scan 跟随浮窗已开时，把波形切到选中标记所在的显示列。
@@ -750,6 +780,7 @@ class BScanView(BScanSelectionMixin, BScanTimeWindowMixin, BScanViewFullscreenMi
             self._plot, dark,
             colorbar_axis=(self._colorbar.axis
                            if self._colorbar is not None else None))
+        self.marker_strip.sync_axis_title()
         self._refresh_control_palette(dark)
         # 十字光标：深色主题黄 / 浅色主题深红（图像与白底上均醒目）
         crosshair_pen = pg.mkPen(

@@ -99,6 +99,7 @@ class BScanViewDataMixin:
         self.set_qc_local_mask(getattr(bundle, 'trace_qc_local_mask', None))
         self._sample_indices = getattr(bundle, 'sample_indices', None)
         self.set_acquisition_markers(getattr(bundle, 'acquisition_markers', ()))
+        self.set_marker_view(getattr(bundle, 'marker_view', None))
         # 海拔纵轴的两份原料（均已降到显示网格）：逐道地面高程 + 米制深度
         self._ground_elevation_m = getattr(bundle, 'trace_elevation_m', None)
         self._depth_axis_m = getattr(bundle, 'depth_axis_m', None)
@@ -130,6 +131,7 @@ class BScanViewDataMixin:
 
         mat = np.asarray(matrix)
         self.set_acquisition_markers(())
+        self.set_marker_view(None)
         self.set_qc_bad_mask(None)
         self.set_qc_local_mask(None)
         if getattr(self, '_qc_focus', None) is not None:
@@ -138,6 +140,7 @@ class BScanViewDataMixin:
         if mat.ndim != 2:
             raise ValueError('B-Scan 矩阵必须是二维 (samples, traces)')
         view = mat  # 零拷贝；row-major 下 y=采样(行)、x=道(列)
+        self._close_view_menu()
         self._gain_cache = None
         self._envelope_cache = None
         self._elev_cache = None
@@ -181,9 +184,9 @@ class BScanViewDataMixin:
         if self.display_mode is not BScanDisplayMode.GRAYSCALE:
             self._apply_display_mode(self.display_mode, reset_view=False)
         # 图内标题只留数据身份（如"测线 L3"）；空标题时 pyqtgraph 自动隐藏。
-        # 8pt 小字（空间瘦身）：身份保留、标题行高约减半，默认字号太占纵向。
+        # 没有图内标题时用 None 收起标题行，避免在已有来源标签下占用空间。
         self._export_title = str(title or '')
-        self._plot.setTitle(self._compact_title_html(self._export_title))
+        self._plot.setTitle(self._compact_title_html(self._export_title) or None)
         self._plot.setLabel('bottom', x_label)
         self._plot.setLabel('left', y_label)
         # 数据换了 → 轴可用性与刻度都要重算（单位切换不动，标签由调用方给定）
@@ -316,6 +319,8 @@ class BScanViewDataMixin:
                         from PyQt6.QtCore import QRectF
                         (left, right), (top, bottom) = ranges
                         self.set_view_selection(QRectF(left, top, right-left, bottom-top))
+                    elif self._is_legacy_startup_range(ranges):
+                        self.fit_all()
                     else:
                         self._plot.vb.setRange(xRange=ranges[0], yRange=ranges[1], padding=0)
                 except (TypeError, ValueError, IndexError):
@@ -341,6 +346,13 @@ class BScanViewDataMixin:
             self._toggle_crosshair(bool(state.get('crosshair', True)))
         except (TypeError, ValueError, KeyError, AttributeError):
             pass
+
+    def _is_legacy_startup_range(self, ranges) -> bool:
+        """Recognize the old free-fit snapshot with exactly 10% padding on both axes."""
+        if self.aspect_mode() != 'free' or not self._image_shape:
+            return False
+        bounds = [(-.1 * size, 1.1 * size) for size in self._image_shape]
+        return bool(np.allclose(ranges, bounds, rtol=1e-9, atol=1e-9))
 
     def set_global_display_preferences(self, state: dict) -> None:
         """Host-supplied preferences take precedence over old line/tab snapshots."""
@@ -569,23 +581,6 @@ class BScanViewDataMixin:
         power = min(max(self._gain_power, 0.1), 10.0)
         gain = np.power(10.0, self._gain_db * np.power(u, power) / 20.0)
         return np.clip(gain, 1.0, 1000.0)
-
-    def _on_gain_menu(self, mode: str) -> None:
-        """右键「显示增益」子菜单动作：切模式；选 TVG 时弹滑条面板。"""
-        self.set_gain(mode, notify=True)
-        if mode == 'tvg':
-            self._open_tvg_dialog()
-
-    def _open_tvg_dialog(self) -> None:
-        """打开 TVG 滑条面板（非模态，随视图销毁；重复调用只唤起）。"""
-        if self._tvg_dialog is not None:
-            self._tvg_dialog.show()
-            self._tvg_dialog.raise_()
-            self._tvg_dialog.activateWindow()
-            return
-        from ui.widgets.bscan_tvg_dialog import TvgGainDialog
-        self._tvg_dialog = TvgGainDialog(self)
-        self._tvg_dialog.show()
 
     def set_colorbar_visible(self, visible: bool, *, notify: bool = False) -> None:
         """切换右侧色标条的显示；隐藏后其宽度完整归还画布。

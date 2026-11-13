@@ -13,8 +13,7 @@ resize 自动铺满，主题切换自刷新（主窗口遍历的鸭子类型 ``a
     # 数据到达时隐藏：
     self._empty.setVisible(False)
 
-浮层不接管宿主生命周期（宿主即父控件），且始终鼠标事件穿透，不挡宿主
-右键菜单等交互。
+浮层跟随宿主生命周期。纯提示保持鼠标事件穿透。
 """
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QColor
@@ -38,13 +37,11 @@ class EmptyStateOverlay(QWidget):
     :param title: 主句（一句话说清「什么数据会出现在这里」）；
     :param hint: 副句（可选，说明前置条件）。
 
-    早期版本带一个可选行动按钮（``action_text`` + ``sig_action``），但全部
-    10 处调用点都不传按钮文案，该分支始终不可达，已移除。需要「引导用户去
-    某处操作」时，请由宿主页面自己放按钮——浮层刻意保持鼠标穿透。
+    :param action: 可选操作控件，由宿主负责接线。
     """
 
     def __init__(self, host: QWidget, *, icon: FluentIconBase | None,
-                 title: str, hint: str = ''):
+                 title: str, hint: str = '', action: QWidget | None = None):
         super().__init__(host)
         self._icon_base = icon
 
@@ -68,10 +65,11 @@ class EmptyStateOverlay(QWidget):
             self._hint_label.setWordWrap(True)
             layout.addWidget(self._hint_label)
 
+        if action is not None:
+            layout.addWidget(action, alignment=Qt.AlignmentFlag.AlignHCenter)
         layout.addStretch(1)
 
-        # 浮层始终鼠标穿透：不挡宿主右键菜单 / 滚轮等交互
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, action is None)
 
         host.installEventFilter(self)
         self.setGeometry(host.rect())

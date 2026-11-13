@@ -206,6 +206,7 @@ class FieldLineStoreMixin:
                                         trace_interval_m=float(trace_interval_m), distance_axis_status='provided_length')
             trajectory_rows = dataset.metadata.pop("trajectory_rows", None) if isinstance(dataset.metadata, dict) else None
             dataset.metadata["acquisition_companion_files"] = companion_files
+            dataset.metadata["marker_source_version"] = str(uuid.uuid4())
             self.save_gpr_dataset(
                 line_id, dataset, cancel_requested=cancel_requested, progress_callback=progress_callback
             )
@@ -426,6 +427,7 @@ class FieldLineStoreMixin:
         self.assert_writable()
         line_id = self._safe_line_id(line_id)
         matrix_bytes = int(dataset.matrix.size * np.dtype(dataset.matrix.dtype).itemsize)
+        dataset.metadata.setdefault("marker_source_version", str(uuid.uuid4()))
         if getattr(self.storage, "is_hybrid", False):
             path, data_sha256 = self.storage.save_raw_dataset(
                 line_id, dataset, cancel_requested=cancel_requested, progress_callback=progress_callback
@@ -589,6 +591,8 @@ class FieldLineStoreMixin:
         )
         metadata["orientation_fixes"] = fixes
         metadata["orientation_corrected"] = True
+        metadata['marker_source_version'] = str(uuid.uuid4())
+        metadata['marker_source_orientation_valid'] = False
         transposed = GPRDataSet.from_matrix(
             line_id,
             dataset.matrix.T,

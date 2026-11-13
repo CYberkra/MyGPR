@@ -16,8 +16,10 @@ class BScanViewFullscreenMixin:
                 and self._fullscreen.state in ('expanding', 'fullscreen'))
 
     def set_thumbnail_mode(self, on: bool) -> None:
+        self._thumbnail_mode = bool(on)
         for axis in ('bottom', 'left'):
             (self._plot.hideAxis if on else self._plot.showAxis)(axis)
+        self.marker_strip.refresh_visibility()
         if on:
             self._fullscreen_btn.hide()
             for name in ('_fullscreen_fit_btn', '_fullscreen_close_btn'):
@@ -68,10 +70,10 @@ class BScanViewFullscreenMixin:
             return
         self._fullscreen_fit_btn = ToolButton(FIF.FIT_PAGE, self)
         self._fullscreen_fit_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
-        self._fullscreen_fit_btn.setToolTip('回到全览')
-        self._fullscreen_fit_btn.setAccessibleName('回到全览')
+        self._fullscreen_fit_btn.setToolTip('适应全图')
+        self._fullscreen_fit_btn.setAccessibleName('适应全图')
         self._fullscreen_fit_btn.setStyleSheet(self._fullscreen_btn.styleSheet())
-        self._fullscreen_fit_btn.clicked.connect(self.fit_to_data)
+        self._fullscreen_fit_btn.clicked.connect(self.fit_all)
         self._fullscreen_close_btn = ToolButton(FIF.CLOSE, self)
         self._fullscreen_close_btn.setFixedSize(*constants.TOOL_BTN_COMPACT)
         self._fullscreen_close_btn.setToolTip('关闭全屏并返回原视图（Esc）')
@@ -81,23 +83,26 @@ class BScanViewFullscreenMixin:
 
     def _layout_fullscreen_controls(self) -> None:
         active = self._fullscreen is not None and self._fullscreen.state != 'embedded'
-        right = max(6, self.width() - self._fullscreen_btn.width() - 10)
-        self._fullscreen_btn.move(right, 10)
-        self._fullscreen_btn.setVisible(not active)
+        plot_corner = self._glw.mapFromScene(self._plot.vb.sceneBoundingRect().topRight())
+        plot_corner = self._glw.viewport().mapTo(self, plot_corner)
+        right = max(6, min(self.width(), plot_corner.x()) - self._fullscreen_btn.width() - 6)
+        top = max(6, plot_corner.y() + 6)
+        self._fullscreen_btn.move(right, top)
+        self._fullscreen_btn.setVisible(not active and not self._thumbnail_mode)
         self._fullscreen_btn.raise_()
         for name in ('_fullscreen_fit_btn', '_fullscreen_close_btn'):
             button = getattr(self, name, None)
             if button is not None:
-                button.setVisible(active)
+                button.setVisible(active and not self._thumbnail_mode)
                 button.raise_()
         if active:
-            self._fullscreen_close_btn.move(right, 10)
+            self._fullscreen_close_btn.move(right, top)
             self._fullscreen_fit_btn.move(
-                max(6, right - self._fullscreen_close_btn.width() - 6), 10)
+                max(6, right - self._fullscreen_close_btn.width() - 6), top)
 
     def _move_companions_to_host(self) -> None:
         self._fullscreen_companions = []
-        for name in ('_ascan_popup', '_tvg_dialog'):
+        for name in ('_ascan_popup',):
             widget = getattr(self, name, None)
             if widget is None:
                 continue

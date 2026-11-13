@@ -169,5 +169,29 @@ def test_auto_scroll_toggle_button(qapp, panel):
 def test_cancel_job_signal_wiring(qapp, panel):
     got = []
     panel.cancel_job_requested.connect(got.append)
-    panel.mini_jobs().cancel_requested.emit('J1')
+    panel.job_table().upsert_job('J1', '测线 L01')
+    panel.job_table().activate_job('J1')
     assert got == ['J1']
+
+
+def test_batch_keeps_successful_and_failed_lines_available_in_output_panel(panel):
+    table = panel.job_table()
+    opened = []
+    table.action_requested.connect(opened.append)
+    table.upsert_job('J1', '处理流水线 L01')
+    table.upsert_job('J2', '处理流水线 L02')
+    table.add_batch('batch', ('J1', 'J2'))
+    assert table.context_table().isRowHidden(table._rows['J1'])
+    table.set_status('J1', 'completed')
+    table.set_job_action('J1', '查看结果')
+    assert table.finished_count() == 0
+    table.update_progress('J2', 1, 2, 'L02 输入读取失败')
+    table.set_status('J2', 'failed')
+    assert '1 失败' in panel._jobs_tab.text()
+    assert '1 成功' in table.job_snapshot('batch')['message']
+    table.activate_job('batch')
+    assert not table.context_table().isRowHidden(table._rows['J1'])
+    assert not table.context_table().isRowHidden(table._rows['J2'])
+    table.activate_job('J1')
+    assert opened == ['J1']
+    assert not table.can_cancel('batch')

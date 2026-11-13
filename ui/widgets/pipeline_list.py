@@ -10,6 +10,8 @@
 InternalMove 默认实现（它挪 item 会丢/错位 setItemWidget 行控件）。
 """
 
+from uuid import uuid4
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel,
@@ -133,6 +135,7 @@ class PipelineList(QWidget):
         self._steps = []
         for s in (steps or []):
             self._steps.append({
+                '_step_uid': s.get('_step_uid') or uuid4().hex,
                 'method_id': s.get('method_id', ''),
                 'label': s.get('label', ''),
                 'params': dict(s.get('params') or {}),
@@ -145,6 +148,17 @@ class PipelineList(QWidget):
                  'params': dict(s['params']), 'enabled': s['enabled']}
                 for s in self._steps]
 
+    def draft_steps(self) -> list:
+        """Keep step identities in UI drafts, outside submitted pipelines."""
+        return [dict(step, _step_uid=stored['_step_uid'])
+                for step, stored in zip(self.steps(), self._steps)]
+
+    def step_uid(self, index: int) -> str:
+        return self._steps[index]['_step_uid'] if 0 <= index < self.count() else ''
+
+    def index_of_step(self, uid: str) -> int:
+        return next((i for i, step in enumerate(self._steps) if step['_step_uid'] == uid), -1)
+
     def count(self) -> int:
         """处理链步骤数。"""
         return len(self._steps)
@@ -156,7 +170,8 @@ class PipelineList(QWidget):
 
     def add_step(self, method_id: str, label: str, params: dict) -> None:
         self._steps.append({'method_id': method_id, 'label': label,
-                            'params': dict(params or {}), 'enabled': True})
+                            'params': dict(params or {}), 'enabled': True,
+                            '_step_uid': uuid4().hex})
         self._rebuild(select=len(self._steps) - 1)
         self.sig_changed.emit()
 

@@ -27,9 +27,9 @@ class FieldTargetStoreMixin:
         source = f"{line_id}_raw"
         return [
             self._target_payload("T-01", line_id, 18.62, 1.35, "疑似管线", "★★★★☆", "已确认", "疑似电缆管线，走向近似垂直", now, source),
-            self._target_payload("T-02", line_id, 62.47, 2.02, "疑似空洞", "★★★☆☆", "待复核", "振幅弱，双曲线特征不连续", now, source),
+            self._target_payload("T-02", line_id, 62.47, 2.02, "疑似空洞", "★★★☆☆", "待确认", "振幅弱，双曲线特征不连续", now, source),
             self._target_payload("T-03", line_id, 96.83, 1.60, "疑似排水管", "★★★★☆", "已确认", "双曲线征清晰，尺寸较大", now, source),
-            self._target_payload("T-04", line_id, 142.18, 1.25, "疑似管线", "★★★☆☆", "待复核", "信号中等，建议开挖验证", now, source),
+            self._target_payload("T-04", line_id, 142.18, 1.25, "疑似管线", "★★★☆☆", "待确认", "信号中等，建议开挖验证", now, source),
             self._target_payload("T-05", line_id, 179.41, 1.90, "疑似结构物", "★★★☆☆", "待确认", "可能为检查井或井室结构", now, source),
         ]
 

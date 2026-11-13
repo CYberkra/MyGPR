@@ -152,6 +152,8 @@ class TestSettingsPageMirror:
             'bscan_p_high': 94.0,
             'bscan_gain_mode': 'sec',
             'bscan_gain_alpha': 1.5,
+            'bscan_tvg_db': 33.0,
+            'bscan_tvg_power': 1.7,
             'bscan_colorbar_visible': False,
             'bscan_levels_follow_view': True,
             'bscan_qc_marks_visible': True,

@@ -222,10 +222,10 @@ def _legacy_target_counts(store: FieldProjectStore, line_id: str) -> tuple[int, 
     pending = 0
     for item in targets:
         status = str(item.get("status", ""))
-        if "确认" in status or "已" in status:
-            confirmed += 1
-        elif "复核" in status or "待" in status:
+        if status.startswith(("待", "未")) or "复核" in status:
             pending += 1
+        elif "确认" in status or "已" in status:
+            confirmed += 1
     return len(targets), confirmed, pending
 
 
@@ -322,8 +322,8 @@ def _build_attention_items(
     missing_traj = line_count - trajectory_count
     if line_count and missing_traj > 0:
         attention.append(("⚠", "辅助定位文件不完整", f"还有 {missing_traj} 条测线未附加 RTK/IMU 轨迹。", f"{missing_traj} 条"))
-    if interface.pending > 0:
-        attention.append(("ℹ", "待复核界面标注", f"共有 {interface.pending} 条测线的基覆界面曲线需要人工复核或确认。", f"{interface.pending} 条"))
+    if interface.line_count and interface.pending > 0:
+        attention.append(("ℹ", "基覆界面草稿", f"{interface.pending} 条测线已保存界面草稿。", f"{interface.pending} 条"))
     not_annotated = max(imported_count - interface.line_count, 0)
     if imported_count and not_annotated > 0:
         attention.append(("◷", "基覆界面尚未标注", f"还有 {not_annotated} 条已导入测线没有界面曲线或无界面判定。", f"{not_annotated} 条"))
@@ -363,7 +363,7 @@ def _build_task_rows(
     if interface.confirmed == imported_count and imported_count:
         interface_status = "● 已完成"
     elif interface.line_count:
-        interface_status = "⚠ 待复核"
+        interface_status = "有草稿" if interface.pending else "部分测线已标注"
     else:
         interface_status = "◷ 待标注"
     report_task_status = "● 已生成" if report_status == "已生成" else (

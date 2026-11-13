@@ -88,6 +88,7 @@ def test_every_algorithm_has_an_explicit_axis_transform():
     expected = {
         'time_cut': 'sample_crop',
         'trace_cut': 'trace_crop',
+        'trace_range_select': 'trace_crop',
         'trace_qc': 'trace_crop',
         'time_to_depth': 'time_to_depth',
         'motion_compensation_speed': 'trace_resample',

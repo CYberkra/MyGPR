@@ -15,6 +15,7 @@ class ElidedCaptionLabel(CaptionLabel):
     def setText(self, text):
         self._full_text = str(text)
         self.setToolTip(self._full_text)
+        self.updateGeometry()
         self._refresh_text()
 
     def _refresh_text(self):

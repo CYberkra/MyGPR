@@ -124,7 +124,7 @@ class SettingsPage(ScrollArea):
 
         低频显示偏好集中在此；改动即时应用到所有测线与视图并跨会话保存。
         """
-        card, layout = make_card('B-Scan 视图')
+        card, layout = make_card('B-scan 默认显示')
         self._build_bscan_axis_section(layout, card)
         self._build_bscan_visibility_section(layout, card)
         self._build_bscan_appearance_section(layout, card)
@@ -132,7 +132,7 @@ class SettingsPage(ScrollArea):
 
     def _build_bscan_visibility_section(self, layout, card) -> None:
         layout.addWidget(self._section_header('查看与标记', card))
-        self._bscan_levels_follow_check = CheckBox('色阶跟随查看范围（全局）', card)
+        self._bscan_levels_follow_check = CheckBox('色阶跟随查看范围', card)
         self._bscan_levels_follow_check.setToolTip(
             '缩放、框选或平移时，按可见数据定标；关闭后按整条测线定标。'
             '所有测线与视图共用此设置；统一色阶比较时仍保持固定色阶。')
@@ -248,12 +248,10 @@ class SettingsPage(ScrollArea):
         self._bscan_gain_combo.addItem('关闭', userData='off')
         self._bscan_gain_combo.addItem('SEC 补偿（扩散+指数吸收）',
                                        userData='sec')
-        self._bscan_gain_combo.addItem('TVG 补偿（滑条调参）', userData='tvg')
+        self._bscan_gain_combo.addItem('TVG 补偿', userData='tvg')
         self._bscan_gain_combo.setMinimumWidth(200)
         self._bscan_gain_combo.setToolTip(
-            'SEC：按深度补偿球面扩散与介质吸收，物理口径一键即用。TVG：'
-            '幂次曲线，选后在 B-Scan 上右键「显示增益」弹出滑条面板调参'
-            '（拖动实时生效）。两者都只在显示域逐行缩放，不改动存储数据。')
+            '应用到全部 B-scan。SEC 补偿球面扩散与介质吸收，TVG 使用幂次曲线。')
         self._bscan_gain_combo.currentIndexChanged.connect(
             self._emit_bscan_changed)
         self._bscan_gain_alpha_spin = DoubleSpinBox(card)
@@ -270,6 +268,30 @@ class SettingsPage(ScrollArea):
         layout.addLayout(make_form_row(
             '显示增益:', self._bscan_gain_combo, self._bscan_gain_alpha_spin,
             parent=card, trailing_stretch=False))
+        self._bscan_tvg_db_spin = DoubleSpinBox(card)
+        self._bscan_tvg_power_spin = DoubleSpinBox(card)
+        for spin, lower, upper, value, step, description in (
+            (self._bscan_tvg_db_spin, 0.0, 60.0, 24.0, 0.1, 'TVG 深端总增益（dB）'),
+            (self._bscan_tvg_power_spin, 0.3, 3.0, 1.0, 0.01, 'TVG 曲线幂次'),
+        ):
+            spin.setRange(lower, upper)
+            spin.setDecimals(2)
+            spin.setSingleStep(step)
+            spin.setValue(value)
+            spin.setAccessibleName(description)
+            spin.setToolTip(description + '，应用到全部 B-scan')
+            spin.valueChanged.connect(self._emit_bscan_changed)
+        self._bscan_tvg_db_spin.setSuffix(' dB')
+        layout.addLayout(make_form_row('TVG 参数:', self._bscan_tvg_db_spin, self._bscan_tvg_power_spin,
+                                       parent=card, trailing_stretch=False))
+        self._bscan_gain_combo.currentIndexChanged.connect(self._sync_bscan_gain_controls)
+        self._sync_bscan_gain_controls()
+
+    def _sync_bscan_gain_controls(self):
+        mode = self._bscan_gain_combo.currentData()
+        self._bscan_gain_alpha_spin.setEnabled(mode == 'sec')
+        self._bscan_tvg_db_spin.setEnabled(mode == 'tvg')
+        self._bscan_tvg_power_spin.setEnabled(mode == 'tvg')
 
     @staticmethod
     def _section_header(text: str, parent) -> StrongBodyLabel:
@@ -365,6 +387,7 @@ class SettingsPage(ScrollArea):
                    self._bscan_cmap_combo, self._bscan_contrast_spin,
                    self._bscan_p_low_spin, self._bscan_p_high_spin,
                    self._bscan_gain_combo, self._bscan_gain_alpha_spin,
+                   self._bscan_tvg_db_spin, self._bscan_tvg_power_spin,
                    self._bscan_colorbar_check, self._bscan_levels_follow_check,
                    self._bscan_qc_marks_check)
         self._loading_settings = True
@@ -410,6 +433,16 @@ class SettingsPage(ScrollArea):
                     data.get('bscan_gain_alpha', 0.2)))
             except (TypeError, ValueError):
                 pass        # 坏值：保持默认（同 spin 同步的容错口径）
+            for spin, key, fallback in (
+                (self._bscan_tvg_db_spin, 'bscan_tvg_db', 24.0),
+                (self._bscan_tvg_power_spin, 'bscan_tvg_power', 1.0),
+            ):
+                try:
+                    value = float(data.get(key, fallback))
+                except (TypeError, ValueError):
+                    value = fallback
+                spin.setValue(value if math.isfinite(value) else fallback)
+            self._sync_bscan_gain_controls()
             self._bscan_colorbar_check.setChecked(bool(
                 data.get('bscan_colorbar_visible', True)))
             self._bscan_levels_follow_check.setChecked(bool(
@@ -440,6 +473,8 @@ class SettingsPage(ScrollArea):
             'bscan_p_high': float(self._bscan_p_high_spin.value()),
             'bscan_gain_mode': str(self._bscan_gain_combo.currentData()),
             'bscan_gain_alpha': float(self._bscan_gain_alpha_spin.value()),
+            'bscan_tvg_db': float(self._bscan_tvg_db_spin.value()),
+            'bscan_tvg_power': float(self._bscan_tvg_power_spin.value()),
             'bscan_colorbar_visible': bool(
                 self._bscan_colorbar_check.isChecked()),
             'bscan_levels_follow_view': self._bscan_levels_follow_check.isChecked(),
@@ -467,6 +502,8 @@ class SettingsPage(ScrollArea):
             (self._bscan_p_low_spin, 'bscan_p_low'),
             (self._bscan_p_high_spin, 'bscan_p_high'),
             (self._bscan_gain_alpha_spin, 'bscan_gain_alpha'),
+            (self._bscan_tvg_db_spin, 'bscan_tvg_db'),
+            (self._bscan_tvg_power_spin, 'bscan_tvg_power'),
         )
         checks = (
             (self._bscan_colorbar_check, 'bscan_colorbar_visible'),
@@ -502,6 +539,7 @@ class SettingsPage(ScrollArea):
             for check, key in checks:
                 if key in values:
                     check.setChecked(bool(values[key]))
+            self._sync_bscan_gain_controls()
         finally:
             for widget in touched:
                 widget.blockSignals(False)

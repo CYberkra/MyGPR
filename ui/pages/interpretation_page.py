@@ -3,7 +3,7 @@
 
 布局（保持既有美术风格：卡片 + 灰白底 + 圆角）：
 - 顶部工具卡片（两行，防叠字）：
-    行1 = 测线 / 数据（原始|成果）/ 打开标注会话 + 右侧会话状态
+    行1 = 测线 / 数据（原始或成果）/ 开始标注 + 保存状态
     行2 = 自动追踪 / 吸附 / 平滑 | 撤销 / 重做 | 保存标注
 - 主区左（stretch）：剖面标注卡片 = BScanView（pick 模式，点击追加点；
   overlay #fbbf24）。pick/overlay 均为原始数据坐标（BScanView 内部完成
@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     CaptionLabel, CardWidget, ComboBox, DoubleSpinBox, PrimaryPushButton,
-    PushButton,
+    PushButton, TransparentPushButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -73,7 +73,6 @@ class InterpretationPage(PanelStateMixin, QWidget):
         self._busy = False
         self._velocity_running = False  # 提交后到回调前的在飞窗口，防重复提交
         self._session_active = False  # 会话未打开时禁用编辑按钮与 pick
-        self._saved_status = 'draft'
         self._sm = None
         self._build_ui()
         self._connect_internal()
@@ -116,16 +115,20 @@ class InterpretationPage(PanelStateMixin, QWidget):
         self._artifact_combo.setMinimumWidth(180)
         self._artifact_combo.setToolTip('选择标注对象：原始数据或某个处理成果')
         row1.addWidget(self._artifact_combo)
-        self._open_session_btn = PushButton('打开标注会话', card, FIF.EDIT)
-        self._open_session_btn.setToolTip('在所选数据上打开标注会话；打开后在剖面图上左键拾取标注点')
+        self._open_session_btn = PushButton('开始标注', card, FIF.EDIT)
+        self._open_session_btn.setToolTip('开始后，在剖面上点击取点')
+        self._session_source_id = None
+        self._artifact_combo.currentIndexChanged.connect(self._sync_session_button)
         row1.addWidget(self._open_session_btn)
         row1.addStretch(1)
-        self._session_status_label = make_hint('未打开会话', parent=card)
+        self._session_status_label = make_hint('', parent=card)
         row1.addWidget(self._session_status_label)
         layout.addLayout(row1)
 
         # ---- 行2：编辑操作（追踪/吸附/平滑 | 撤销/重做 | 保存）
-        row2 = QHBoxLayout()
+        self._edit_bar = QWidget(card)
+        row2 = QHBoxLayout(self._edit_bar)
+        row2.setContentsMargins(0, 0, 0, 0)
         row2.setSpacing(constants.CARD_SPACING)
         self._auto_trace_btn = PushButton('自动追踪', card, FIF.SEARCH)
         self._auto_trace_btn.setToolTip('基于已有标注点自动追踪同相轴')
@@ -148,15 +151,22 @@ class InterpretationPage(PanelStateMixin, QWidget):
         self._confirm_btn.setToolTip('至少两个有效点；确认后可生成正式空间成果')
         row2.addWidget(self._confirm_btn)
         row2.addStretch(1)
-        layout.addLayout(row2)
+        layout.addWidget(self._edit_bar)
         return card
 
     def _build_bscan_card(self) -> CardWidget:
         """剖面标注卡片：BScanView（pick 模式 + overlay）。"""
         card, layout = make_card(parent=self)
         self._bscan = BScanView(card)
-        self._bscan.setMinimumHeight(420)
+        self._bscan.set_title_visible(False)
         self._bscan.set_pick_enabled(False)  # 会话打开前禁用 pick（P1-6）
+        from ui.widgets.marker_workspace_tools import MarkerWorkspaceTools
+        self.marker_tools = MarkerWorkspaceTools(self._bscan, lambda: [self._bscan], lambda: self._bscan)
+        self.marker_tools.connect_view(self._bscan)
+        markers = TransparentPushButton('标记 ▾', card)
+        markers.setFixedHeight(constants.TOOL_BTN_SIZE[1])
+        markers.clicked.connect(lambda: self.marker_tools.menu(self._bscan, markers.mapToGlobal(markers.rect().bottomLeft())))
+        layout.addWidget(markers, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self._bscan, 1)
         return card
 
@@ -167,11 +177,11 @@ class InterpretationPage(PanelStateMixin, QWidget):
         panel = self._right_panel
 
         # ---------------- 标注点列表
-        points_card, points_layout = make_card('标注点列表')
+        points_card, points_layout = make_card('标注点')
 
         self._points_table = QTableWidget(0, 5, points_card)
         self._points_table.setHorizontalHeaderLabels(
-            ['#', '道', '采样点', '时间(ns)', '估深(m)'])
+            ['#', '道', '采样点', '时间（ns）', '估计深度（m）'])
         self._points_table.verticalHeader().setVisible(False)
         self._points_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -300,12 +310,26 @@ class InterpretationPage(PanelStateMixin, QWidget):
 
     def set_session_info(self, text: str) -> None:
         """会话状态文案（顶部状态 CaptionLabel）。"""
-        text = text or '未打开会话'
         self._session_status_label.setText(text)
 
+    def set_session_source(self, artifact_id: str) -> None:
+        """Reflect an externally opened session in the source selector."""
+        index = self._artifact_combo.findData(artifact_id)
+        if artifact_id and index < 0:
+            self._artifact_combo.addItem(f'成果: {artifact_id}', userData=artifact_id)
+            index = self._artifact_combo.count() - 1
+        self._artifact_combo.setCurrentIndex(max(0, index))
+        self._session_source_id = artifact_id
+        self._sync_session_button()
+
+    def _sync_session_button(self):
+        current = self._session_active and self._current_artifact_id() == self._session_source_id
+        self._open_session_btn.setText('切换标注数据' if self._session_active else '开始标注')
+        self._open_session_btn.setVisible(not current)
+
     def set_saved_status(self, status):
-        self._saved_status = str(status or 'draft')
-        self.set_session_info('已确认' if self._saved_status == 'confirmed' else '草稿已保存')
+        labels = {'confirmed': '已确认', 'draft': '草稿已保存'}
+        self.set_session_info(labels.get(status, ''))
 
     def set_annotation_metadata(self, annotation):
         self._annotation_name.setText(str(getattr(annotation, 'name', '') or ''))
@@ -315,11 +339,8 @@ class InterpretationPage(PanelStateMixin, QWidget):
         self._uncertainty.setValue(float(getattr(annotation, 'uncertainty_samples', 0.0) or 0.0))
         self._annotation_note.setText(str(getattr(annotation, 'note', '') or ''))
 
-    def _mark_review_required(self):
-        if self._saved_status == 'confirmed':
-            self.set_session_info('已修改，需重新确认')
-        else:
-            self.set_session_info('草稿有未保存的修改')
+    def mark_unsaved(self):
+        self.set_session_info('有未保存的修改')
 
     def _emit_properties(self):
         self.properties_requested.emit({
@@ -380,6 +401,9 @@ class InterpretationPage(PanelStateMixin, QWidget):
             self._points_revision += 1
             self._points_context.close()
         self._session_active = bool(active)
+        if not active:
+            self._session_source_id = None
+        self._sync_session_button()
         self._update_edit_enabled()
 
     # ============================================================ 内部逻辑
@@ -395,6 +419,8 @@ class InterpretationPage(PanelStateMixin, QWidget):
 
     def _update_edit_enabled(self) -> None:
         enabled = self._session_active and not self._busy
+        self._edit_bar.setVisible(self._session_active)
+        self._right_panel.setVisible(self._session_active)
         for btn in (self._auto_trace_btn, self._snap_btn, self._smooth_btn,
                     self._undo_btn, self._redo_btn, self._save_btn, self._confirm_btn,
                     self._properties_btn, self._zone_btn, self._borehole_save_btn,
@@ -420,7 +446,7 @@ class InterpretationPage(PanelStateMixin, QWidget):
         body = (result or {}).get('evidence', {}).get('body', {}) \
             if isinstance(result, dict) else {}
         if not body:
-            self._velocity_result_label.setText('拟合完成（无证据返回）')
+            self._velocity_result_label.setText('没有可显示的拟合结果')
             return
         lines = [
             '测线: %s' % (line_id or '--'),
@@ -445,7 +471,7 @@ class InterpretationPage(PanelStateMixin, QWidget):
     def _on_point_picked(self, trace: int, sample: int) -> None:
         """pick 点击追加点（原始数据坐标）→ overlay/列表末行增量插入 + points_changed。"""
         self._points.append((int(trace), int(sample)))
-        self._mark_review_required()
+        self.mark_unsaved()
         self._points_revision += 1
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
         self._append_points_row(len(self._points) - 1)
@@ -480,7 +506,7 @@ class InterpretationPage(PanelStateMixin, QWidget):
         table_updated=True 表示调用方已完成表格局部更新（单点删除），
         此处跳过整表重建。
         """
-        self._mark_review_required()
+        self.mark_unsaved()
         self._points_revision += 1
         self._points_context.close()
         self._bscan.set_overlay_points(self._points, _OVERLAY_COLOR)
@@ -516,7 +542,7 @@ class InterpretationPage(PanelStateMixin, QWidget):
                           lambda: QApplication.clipboard().setText(text) if valid() else None)
             menu.addSeparator()
             enabled = self._session_active and not self._busy
-            reason = '当前忙碌' if self._busy else '请先打开标注会话'
+            reason = '正在处理' if self._busy else '请先开始标注'
 
             def remove():
                 if valid() and self._session_active and not self._busy:

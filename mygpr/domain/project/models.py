@@ -201,6 +201,7 @@ class ProjectMetadata:
     device_model: str = ""
     coordinate_system: str = ""
     vertical_datum: str = ""
+    timezone: str = "UTC"
 
 
 @dataclass(frozen=True, slots=True)

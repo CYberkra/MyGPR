@@ -10,6 +10,7 @@
 raw core / domain 类型只在内部翻译后通过 DTO 返回。
 """
 from __future__ import annotations
+from mygpr.domain.markers.geographic import geographic_rows as geographic_rows
 
 import logging
 from typing import Any, Mapping
@@ -41,6 +42,27 @@ from core.method_registry_metadata import (
 from mygpr.domain.acquisition.models import SensorSyncSettings
 from mygpr.domain.interpretation.models import BoreholeRecord, InterpretationZone
 from mygpr.domain.processing.models import PipelineDefinition, PipelineStep
+from mygpr.domain.markers.models import (
+    EventInterval as EventInterval, MarkerAnchor as MarkerAnchor,
+    MarkerRecord as MarkerRecord, PURPOSES as PURPOSES,
+)
+
+
+def marker_rows_for_view(view):
+    from mygpr.application.project.marker_service import project_rows
+    return project_rows(view)
+
+
+def export_marker_views(backend, views, path, format_name):
+    return backend.projects.export_markers(views, path, format_name)
+
+
+def attach_marker_view(backend, bundle, project_id, line_id, artifact_id=''):
+    from dataclasses import replace
+    # Some isolated previews have no project backend (e.g. standalone CSV tools).
+    if not hasattr(backend, 'markers'):
+        return bundle
+    return replace(bundle, marker_view=backend.markers.view(project_id, line_id, artifact_id))
 
 __all__ = [
     "GPRDataSet",
@@ -294,6 +316,19 @@ def _extract_parameter_schema(raw: Mapping[str, Any]) -> tuple[dict, ...]:
     return tuple(visible_items)
 
 
+_TIME_CUT_FIELDS = {
+    "mode": {
+        "choices": ("remove_below", "remove_above", "keep_range"),
+        "choice_labels": {"remove_below": "裁掉结束时间后",
+                          "remove_above": "裁掉起始时间前",
+                          "keep_range": "保留时间范围"},
+    },
+    "time_start_ns": {"visible_when": {"mode": ("remove_above", "keep_range")}},
+    "time_end_ns": {"tooltip": "填 0 时保留到剖面底部",
+                    "visible_when": {"mode": ("remove_below", "keep_range")}},
+}
+
+
 def method_catalog() -> tuple[UiMethodEntry, ...]:
     """Return the processing method catalog as typed, immutable DTOs.
 
@@ -314,6 +349,9 @@ def method_catalog() -> tuple[UiMethodEntry, ...]:
         meta = METHOD_METADATA.get(method_id, {})
         category = str(meta.get("category") or raw.get("category") or "experimental")
         tag = METHOD_TAGS.get(method_id)
+        fields = _extract_parameter_schema(raw)
+        if method_id == "time_cut":
+            fields = tuple({**field, **_TIME_CUT_FIELDS.get(field["name"], {})} for field in fields)
         entry = UiMethodEntry(
             method_id=str(method_id),
             name=str(raw.get("name", method_id)),
@@ -322,7 +360,7 @@ def method_catalog() -> tuple[UiMethodEntry, ...]:
             category_label=str(METHOD_CATEGORY_LABELS.get(category, category)),
             tags=(str(tag),) if tag else (),
             auto_tune_enabled=bool(raw.get("auto_tune_enabled", False)),
-            parameter_schema=_extract_parameter_schema(raw),
+            parameter_schema=fields,
             description=str(raw.get("description") or ""),
         )
         items.append(entry)

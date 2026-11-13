@@ -4,6 +4,7 @@ from PyQt6.QtGui import QDrag
 from PyQt6.QtWidgets import QApplication, QTabBar, QWidget
 from qfluentwidgets import FluentIcon as FIF, ToolButton
 from ui import motion
+from ui.widgets.context_menus import bind_menu_keys
 
 
 class _SourceTabBar(QTabBar):
@@ -25,6 +26,7 @@ class _SourceTabBar(QTabBar):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName('B-scan 数据标签')
+        self._menu_shortcuts = bind_menu_keys(self, self._show_keyboard_menu)
         self.indicator = QWidget(self)
         self.indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.indicator.hide()
@@ -137,8 +139,17 @@ class _SourceTabBar(QTabBar):
         super().mouseReleaseEvent(event)
 
     def contextMenuEvent(self, event):
-        index = (self.currentIndex() if event.reason() == event.Reason.Keyboard
-                 else self.tabAt(event.pos()))
+        if event.reason() == event.Reason.Keyboard:
+            self._show_keyboard_menu()
+            event.accept()
+            return
+        index = self.tabAt(event.pos())
         key = str(self.tabData(index) or '') if index >= 0 else ''
         self.group.workspace.show_context_menu(self.group.group_id, key, event.globalPos())
         event.accept()
+
+    def _show_keyboard_menu(self):
+        index = self.currentIndex()
+        key = str(self.tabData(index) or '') if index >= 0 else ''
+        point = self.tabRect(index).bottomLeft() if index >= 0 else self.rect().bottomLeft()
+        self.group.workspace.show_context_menu(self.group.group_id, key, self.mapToGlobal(point))

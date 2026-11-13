@@ -130,7 +130,7 @@ def test_build_project_model_four_categories_with_counts():
     assert nodes[0].children[0].kind == 'line'
     sources = nodes[0].children[0].children
     assert sources[0].kind == 'raw'
-    assert sources[1].text == '历史成果 · 来源待核对'
+    assert sources[1].text == '历史成果 · 缺少来源记录'
     assert sources[1].children[0].kind == 'artifact'
     assert all(node.children == () for node in nodes[1:])
 
@@ -936,7 +936,7 @@ def test_reconfigure_requires_actual_single_step_source_and_info_does_not_activa
     actions['参数与来源'].trigger()
     assert info == [('L01', 'B')]
     assert '数据：B' in displayed[0]
-    assert ('来源待核对' in displayed[0]) is (case == 'legacy')
+    assert ('直接输入：未记录' in displayed[0]) is (case == 'legacy')
     assert focused == []
     actions['修改此步参数并另建分支'].trigger()
     assert reconfigured == ([('L01', 'B')] if enabled else [])

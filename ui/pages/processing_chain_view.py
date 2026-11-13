@@ -1,7 +1,5 @@
 """Visible chain presentation; the page's existing step model owns each draft."""
-from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QWidget
-from qfluentwidgets import CaptionLabel
 
 from ui.widgets.chain_strip import ChainStrip
 from ui.widgets.saved_source_path import SavedSourcePath
@@ -19,10 +17,7 @@ class ProcessingChainView:
         row.setSpacing(6)
         row.addWidget(self._saved_path)
         self._chain_strip = ChainStrip(self._chain_panel)
-        self._chain_input = CaptionLabel('输入：未选择 →', self._chain_panel)
-        self._chain_input.hide()  # The compact header already identifies the active input.
         self._chain_strip.set_run_button_visible(False)
-        self._chain_strip.set_empty_hint('＋ 添加处理步骤')
         row.addWidget(self._chain_strip, 1)
         row.addWidget(self._draft_menu_btn)
         layout.addWidget(self._chain_panel)
@@ -32,6 +27,8 @@ class ProcessingChainView:
         strip.sig_step_selected.connect(self._pipeline_list.select_step)
         strip.sig_step_clicked.connect(self._on_chain_chip_clicked)
         strip.sig_step_editor_requested.connect(self._open_step_editor)
+        strip.sig_step_duplicate_requested.connect(self._duplicate_step)
+        strip.sig_step_replace_requested.connect(self._on_step_editor_replace)
         strip.sig_step_toggled.connect(self._on_chain_step_toggled)
         strip.sig_step_removed.connect(self._on_chain_step_removed)
         strip.sig_step_moved.connect(self._on_chain_step_moved)
@@ -41,9 +38,7 @@ class ProcessingChainView:
         self._workspace.open_source(key)
 
     def _on_chain_chip_clicked(self, index):
-        if not self._draft_locked():
-            self._pipeline_list.select_step(index)
-            self._open_step_editor(index)
+        self._open_step_editor(index)
 
     def _sync_chain_view(self):
         steps = self._pipeline_list.steps()
@@ -59,11 +54,7 @@ class ProcessingChainView:
         finally:
             strip.blockSignals(False)
         strip.setEnabled(not self._draft_locked())
-        source = self._sources.get(self._selected_source_key) or {}
-        title = '输入：' + str(source.get('title') or '未选择') + ' →'
-        self._chain_input.setToolTip(title)
-        self._chain_input.setText(self._chain_input.fontMetrics().elidedText(
-            title, Qt.TextElideMode.ElideMiddle, 185))
+        strip.set_add_enabled(self._can_edit_chain())
         path=[]
         aid=self._input_artifact_id()
         if aid in self._artifacts_by_id:
@@ -77,32 +68,16 @@ class ProcessingChainView:
         self._source_path_btn.setEnabled(len(path) > 1)
         self._saved_path.setVisible(len(path) > 1 and self._source_path_btn.isChecked())
 
-    def _close_chain_popups(self):
-        self._close_gain_previews()
-        for popup in (self._step_editor, self._method_picker):
-            if popup is not None:
-                popup.close()
-
     def _step_summary(self, step):
         schema = self._methods_by_id.get(step.get('method_id'), {}).get('parameter_schema') or []
-        names = {item.get('name'): item.get('label') or item.get('name') for item in schema}
+        fields = {item.get('name'): item for item in schema}
         values = []
         for key, value in (step.get('params') or {}).items():
             if isinstance(value, (str, int, float, bool)) and value != '':
-                values.append(f'{names.get(key, key)}={str(value)[:16]}')
+                field = fields.get(key, {})
+                choices = field.get('choice_labels') or {}
+                label = field.get('label') or key
+                values.append(f'{label}={str(choices.get(str(value), value))[:16]}')
             if len(values) == 2:
                 break
         return ' · '.join(values)
-
-    def _position_step_editor(self, popup, index):
-        anchor = self._chain_strip.step_anchor(index)
-        if anchor is None or not anchor.isVisibleTo(self):
-            return
-        popup.adjustSize()
-        point = anchor.mapToGlobal(QPoint(0, anchor.height() + 5))
-        available = anchor.screen().availableGeometry()
-        x = max(available.left(), min(point.x(), available.right() - popup.width() + 1))
-        y = point.y()
-        if y + popup.height() > available.bottom():
-            y = anchor.mapToGlobal(QPoint()).y() - popup.height() - 5
-        popup.move(x, max(available.top(), y))

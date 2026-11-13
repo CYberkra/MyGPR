@@ -416,10 +416,10 @@ class ProcessingAnalysisService:
             score -= 35.0
         peak_ratio = metrics["peak_ratio"]
         if peak_ratio < 0.03:
-            warnings.append("峰值保留低于 3%，需复核目标响应损失。")
+            warnings.append("处理后峰值低于输入峰值的 3%。")
             score -= 25.0
         elif peak_ratio > 12.0:
-            warnings.append("峰值放大超过 12 倍，需复核削波和数值稳定性。")
+            warnings.append("处理后峰值超过输入峰值的 12 倍。")
             score -= 25.0
         if before.shape != after.shape:
             warnings.append(f"数据形状由 {before.shape} 变为 {after.shape}。")

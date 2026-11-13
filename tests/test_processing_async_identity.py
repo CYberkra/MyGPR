@@ -241,6 +241,7 @@ def test_batch_partial_submission_does_not_report_full_success(qapp):
     notices = []
     controller = SimpleNamespace(run_pipeline_batch=lambda *args, **kwargs: ['J1'])
     coordinator = SimpleNamespace(processing_controller=controller, project_controller=None,
+        jobs=SimpleNamespace(register_batch=lambda *_: None),
         current_project_id=lambda: 'P', infobar=lambda *args: notices.append(args),
         project=SimpleNamespace(current_line_id='L01'))
     chain = ProcessingChain(coordinator)
@@ -261,6 +262,7 @@ def test_batch_submission_failure_is_not_treated_as_single_run_completion(qapp):
     controller.set_backend(SimpleNamespace(backend=SimpleNamespace(submit_project_pipeline=submit), job_bridge=bridge))
     notices = []
     coordinator = SimpleNamespace(processing_controller=controller, project_controller=None,
+        jobs=SimpleNamespace(register_batch=lambda *_: None),
         current_project_id=lambda: 'P', infobar=lambda *args: notices.append(args),
         project=SimpleNamespace(current_line_id='L01'))
     chain = ProcessingChain(coordinator)
@@ -278,6 +280,7 @@ def test_batch_immediate_completion_is_not_lost(qapp):
     from ui.coordinator_processing import ProcessingChain
     notices = []
     coordinator = SimpleNamespace(processing_controller=None, project_controller=None,
+        jobs=SimpleNamespace(register_batch=lambda *_: None),
         current_project_id=lambda: 'P', infobar=lambda *args: notices.append(args),
         project=SimpleNamespace(current_line_id='L01'))
     chain = ProcessingChain(coordinator)

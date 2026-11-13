@@ -31,7 +31,8 @@ class Page:
 @pytest.fixture
 def context():
     pages = {name + 'Interface': Page() for name in
-             ['home', 'project', 'processing', 'interpretation', 'delivery', 'spatial']}
+             ['home', 'project', 'processing', 'interpretation', 'spatial']}
+    pages['spatialInterface'].delivery_tools = Page()
     pc = Page()
     state = NS(project_id='P', live_session='S', dirty_checks=0)
 
@@ -62,6 +63,7 @@ def test_artifact_session_displays_its_matrix_and_raw_cannot_replace_it(context)
     raw, processed = object(), object()
     co.project.on_dataset_preview(raw)
     open_artifact(co)
+    assert ('set_session_source', ('A01',)) in pages['interpretationInterface'].calls
     assert ('preview_artifact', ('L01', 'A01')) in pc.calls
     assert pages['interpretationInterface'].bundle is None  # loading the new source
     co.project.on_artifact_preview('A01', processed)

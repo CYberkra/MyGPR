@@ -40,6 +40,7 @@ class ProcessingChain:
         self.batch_errors = []
         self._batch_submitting = False
         self._batch_pending_completions = []
+        self._batch_rejected_jobs = []
 
     # ============================================================ 信号注册
     def connect_all(self) -> None:
@@ -115,6 +116,9 @@ class ProcessingChain:
             prc.methods_loaded.connect(self.on_methods_loaded)
             if hasattr(prc, 'run_submitted'):
                 prc.run_submitted.connect(self.on_run_submitted)
+            if hasattr(prc, 'pipeline_job_registered'):
+                prc.pipeline_job_registered.connect(co.jobs.register_processing)
+                prc.pipeline_job_rejected.connect(self.on_pipeline_job_rejected)
             if hasattr(prc, 'run_context_finished'):
                 prc.run_context_finished.connect(self.on_run_context_finished)
             else:
@@ -277,6 +281,7 @@ class ProcessingChain:
         result_name = str(payload.get('result_name') or '处理结果').strip()
         self._batch_submitting = True
         self._batch_pending_completions = []
+        self._batch_rejected_jobs = []
         try:
             jobs = self._co.processing_controller.run_pipeline_batch(
                 self._co.current_project_id(), line_ids, {'steps': steps}, result_name,
@@ -286,12 +291,17 @@ class ProcessingChain:
         finally:
             self._batch_submitting = False
         self.batch_job_ids = set(jobs)
+        self._co.jobs.register_batch([*jobs, *self._batch_rejected_jobs])
         self.batch_errors = ['提交失败'] * max(0, len(line_ids) - len(jobs))
         self._co.infobar('warning' if self.batch_errors else 'info', '批量处理',
                          f'已提交 {len(jobs)}/{len(line_ids)} 条测线')
         pending, self._batch_pending_completions = self._batch_pending_completions, []
         for completion in pending:
             self.on_run_context_finished(*completion)
+
+    def on_pipeline_job_rejected(self, context, message):
+        if self._batch_submitting:
+            self._batch_rejected_jobs.append(self._co.jobs.record_submission_failure(context, message))
 
     def on_estimate_requested(self, payload: dict) -> None:
         line_id = self._co.require_line()
@@ -385,13 +395,12 @@ class ProcessingChain:
         tree = self._co.file_tree()
         if tree is not None and hasattr(tree, 'set_processing_input'):
             tree.set_processing_input(run_line_id, '', False)
+        if self._co.project_controller is not None and run_line_id:
+            self._co.project_controller.refresh_artifacts(run_line_id)
+            self._co.project_controller.refresh_lines()
         if success:
             self._co.infobar('success', '处理链',
                              message or f'处理链运行完成：{run_line_id}')
-            if self._co.project_controller is not None and run_line_id:
-                # 只有成果属于当前查看的测线时才自动预览，避免抢走用户视图
-                self._co.project_controller.refresh_artifacts(run_line_id)
-                self._co.project_controller.refresh_lines()
         elif cancelled:
             self._co.infobar('info', '处理链', f'处理链已取消：{run_line_id}')
         else:
@@ -399,17 +408,20 @@ class ProcessingChain:
 
     def on_autotune_requested(self, method_id: str, params_hint: dict,
                               input_artifact_id: str = "") -> None:
+        processing = self._co.page('processingInterface')
         if self._co.processing_controller is None:
+            processing.set_autotune_failed(method_id)
             return
         line_id = self._co.require_line()
         if not line_id:
+            processing.set_autotune_failed(method_id)
             return
         self._co.processing_controller.run_autotune(
             self._co.current_project_id(), line_id, str(method_id),
             dict(params_hint or {}),
             input_artifact_id=str(input_artifact_id or ""))
         # P2-7：运行期间禁用"开始调参"，防重复提交
-        self._co.page('processingInterface').set_autotune_running(True)
+        processing.set_autotune_running(True)
         self._co.infobar('info', 'AutoTune 自动调参', f'已提交调参任务：{method_id}')
 
     def on_autotune_finished(self, method_id: str, result: dict) -> None:
@@ -419,7 +431,7 @@ class ProcessingChain:
         self._co.infobar('success', 'AutoTune 自动调参', f'调参完成：{method_id}')
 
     def on_autotune_failed(self, method_id: str, message: str) -> None:
-        self._co.page('processingInterface').set_autotune_running(False)
+        self._co.page('processingInterface').set_autotune_failed(method_id)
         self._co.infobar('error', 'AutoTune 自动调参',
                          f'{method_id}: {message}')
 
@@ -498,15 +510,17 @@ class ProcessingChain:
                                int(getattr(point, 'sample_index', 0))))
         return result
 
-    def on_open_session_requested(self, artifact_id: str = "") -> None:
+    def on_open_session_requested(self, artifact_id: str = "") -> bool:
         if self._co.interpretation_controller is None:
-            return
+            return False
         line_id = self._co.require_line()
         if line_id and self._co.project.confirm_interpretation_close():
             self._co.interpretation_controller.open_session(
                 self._co.current_project_id(), line_id,
                 input_artifact_id=str(artifact_id or ""),
             )
+            return True
+        return False
 
     def on_session_opened(self, snapshot) -> None:
         if not self._is_current_interpretation(snapshot):
@@ -517,17 +531,13 @@ class ProcessingChain:
         # Keep it empty until this session's source preview arrives.
         interpretation.set_bundle(None)
         interpretation.set_points(self._snapshot_points(snapshot))
-        line_id = str(getattr(snapshot, 'line_id', '') or ''
-                      ) or self._co.project.current_line_id
-        interpretation.set_session_info(f'会话已打开（{line_id}）')
         interpretation.set_session_active(True)
+        interpretation.set_session_source(str(getattr(snapshot, 'input_artifact_id', '') or ''))
         annotation = getattr(snapshot, 'annotation', None)
-        interpretation.set_saved_status(getattr(annotation, 'status', 'draft'))
+        interpretation.set_saved_status(getattr(annotation, 'status', None))
         interpretation.set_annotation_metadata(annotation)
         if dict(getattr(snapshot, 'audit', {}) or {}).get('source_changed'):
             self._co.infobar('warning', '界面解释标注', '原有标注属于其他数据来源；当前显示新草稿，保存前原标注仍保留。')
-        else:
-            self._co.infobar('success', '界面解释标注', f'标注会话已打开：{line_id}')
         if self._co.project_controller is not None and self._co.project.current_line_id:
             artifact_id = str(getattr(snapshot, 'input_artifact_id', '') or '')
             if artifact_id:
@@ -545,7 +555,7 @@ class ProcessingChain:
         self._interpretation_snapshot = snapshot
         page = self._co.page('interpretationInterface')
         page.set_points(self._snapshot_points(snapshot))
-        page._mark_review_required()
+        page.mark_unsaved()
 
     def interpretation_uses_source(self, artifact_id: str) -> bool:
         """Only a live session may receive its artifact; raw is the default."""

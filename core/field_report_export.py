@@ -27,8 +27,10 @@ from core.project_state_tracker import load_project_state
 from core.report_export_models import REPORT_PACKAGE_SCHEMA, ReportPackageResult
 from core.report_export_renderers import (
     _write_checksums, _write_html_report, _write_pdf_report,
-    _write_report_figures, _write_xlsx_report,
+    _write_xlsx_report,
 )
+from core.report_line_content import choose_report_artifacts
+from core.report_line_figures import build_line_dossiers
 from core.report_export_rows import (
     _artifact_to_row, _atomic_write_csv, _count_csv_rows, _interface_to_row, _line_to_row,
     _load_gis_rows, _quality_report_to_row, _safe_rel, _sensor_sync_to_row,
@@ -72,6 +74,10 @@ def _interface_axes_for_line(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     traces: list[float] = []
     samples: list[float] = []
+    try:
+        annotation = store.load_basal_interface_annotation(line_id, create=False)
+    except (OSError, ValueError, TypeError, KeyError):
+        annotation = None
     contract = store.root / "metadata" / "interpretations" / "interfaces" / f"{line_id}.json"
     if contract.exists():
         try:
@@ -82,10 +88,6 @@ def _interface_axes_for_line(
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             traces.clear(); samples.clear()
     if len(traces) < 2:
-        try:
-            annotation = store.load_basal_interface_annotation(line_id, create=False)
-        except (OSError, ValueError, TypeError, KeyError):
-            annotation = None
         if annotation is not None:
             traces = [float(point.trace_index) for point in annotation.keypoints]
             samples = [float(point.sample_index) for point in annotation.keypoints]
@@ -97,8 +99,13 @@ def _interface_axes_for_line(
     trace_axis, unique_index = np.unique(trace_axis, return_index=True)
     sample_axis = sample_axis[unique_index]
     try:
-        depth_axis = np.asarray(store.load_gpr_dataset(line_id).depth_axis_m, dtype=float)
-    except (OSError, ValueError, TypeError, KeyError):
+        if annotation is None:
+            return None
+        dataset = store._annotation_dataset(line_id, annotation)
+        if dataset.metadata.get('time_axis_status') == 'unknown' and not dataset.metadata.get('is_depth'):
+            return None
+        depth_axis = np.asarray(dataset.depth_axis_m, dtype=float)
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError):
         return None
     if trace_axis.size < 2 or depth_axis.size < 2:
         return None
@@ -191,7 +198,11 @@ def _resolve_spatial_evidence(
                 manifest_sha256 = _sha256_file(
                     manifest_path, cancel_checker=cancel_checker
                 )
-    except Exception:
+    except Exception as exc:
+        from core.job_manager import JobCancelled
+        if requested_id or isinstance(exc, JobCancelled):
+            raise
+        result_id = ""
         record = None
         manifest_path = None
         manifest_sha256 = ""
@@ -242,28 +253,30 @@ def _prepare_package_directories(
 def _select_report_scope(
     store: Any,
     *,
-    selected_line_ids: tuple[str, ...],
-    selected_artifact_ids: tuple[str, ...],
+    all_artifacts: list[Any],
+    selected_line_ids: tuple[str, ...] | None,
+    selected_artifact_ids: tuple[str, ...] | None,
 ) -> tuple[list[Any], list[Any]]:
+    if selected_line_ids is not None and not selected_line_ids:
+        raise ValueError("请至少选择一条报告测线。")
     all_lines = list(store.list_lines())
     all_line_ids = {line.line_id for line in all_lines}
-    unknown_lines = sorted(set(selected_line_ids) - all_line_ids)
+    unknown_lines = sorted(set(selected_line_ids or ()) - all_line_ids)
     if unknown_lines:
         raise ValueError(f"report profile references unknown lines: {unknown_lines}")
     lines = [
         line for line in all_lines
-        if not selected_line_ids or line.line_id in selected_line_ids
+        if selected_line_ids is None or line.line_id in selected_line_ids
     ]
-    all_artifacts = list(index_processing_artifacts(store.root))
     all_artifact_ids = {record.artifact_id for record in all_artifacts}
-    unknown_artifacts = sorted(set(selected_artifact_ids) - all_artifact_ids)
+    unknown_artifacts = sorted(set(selected_artifact_ids or ()) - all_artifact_ids)
     if unknown_artifacts:
         raise ValueError(f"report profile references unknown artifacts: {unknown_artifacts}")
     line_scope = {line.line_id for line in lines}
     artifacts = [
         record for record in all_artifacts
         if record.line_id in line_scope
-        and (not selected_artifact_ids or record.artifact_id in selected_artifact_ids)
+        and (selected_artifact_ids is None or record.artifact_id in selected_artifact_ids)
     ]
     return lines, artifacts
 
@@ -342,6 +355,21 @@ def _collect_line_evidence(
     return quality_rows, interface_rows, target_rows, spatial_rows
 
 
+def _resolve_scoped_spatial_evidence(store, line_scope, requested_id, enabled, cancel_checker):
+    spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts = _resolve_spatial_evidence(
+        store,
+        requested_id=str(requested_id or ""),
+        enabled=enabled,
+        cancel_checker=cancel_checker,
+    )
+    if spatial_record is not None and not set(spatial_record.line_ids) <= line_scope:
+        if requested_id:
+            raise ValueError("所选空间成果包含未选测线。请选择兼容的空间成果。")
+        spatial_result_id, spatial_record = "", None
+        spatial_manifest_path, spatial_manifest_sha256, input_artifacts = None, "", []
+    return spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts
+
+
 def generate_project_report_package(
     store: Any,
     *,
@@ -349,6 +377,7 @@ def generate_project_report_package(
     report_profile: dict[str, Any] | None = None,
     cancel_checker=None,
     progress_callback=None,
+    marker_documents=None,
 ) -> ReportPackageResult:
     """Generate a formal, auditable engineering delivery package.
 
@@ -370,8 +399,10 @@ def generate_project_report_package(
 
     generated_at = local_now()
     report_profile = dict(report_profile or {})
+    from mygpr.domain.markers.delivery import delivery_rows
+    marker_documents = list(marker_documents or ())
     report_id = str(report_profile.get("report_id") or "")
-    template_version = str(report_profile.get("template_version") or "field-industry-v2")
+    template_version = str(report_profile.get("template_version") or "field-industry-v3")
     section_flags = {
         key: bool(report_profile.get(key, True))
         for key in (
@@ -383,8 +414,20 @@ def generate_project_report_package(
     }
     # The integrity manifest is a mandatory engineering-delivery control and cannot be disabled.
     section_flags["include_integrity_manifest"] = True
-    selected_line_ids = tuple(dict.fromkeys(str(value) for value in report_profile.get("selected_line_ids", ()) if str(value)))
-    selected_artifact_ids = tuple(dict.fromkeys(str(value) for value in report_profile.get("selected_artifact_ids", ()) if str(value)))
+
+    def selection(key: str) -> tuple[str, ...] | None:
+        values = report_profile.get(key)
+        return None if values is None else tuple(dict.fromkeys(str(value) for value in values if str(value)))
+
+    all_artifacts = list(index_processing_artifacts(store.root))
+    lines, artifacts = _select_report_scope(
+        store,
+        all_artifacts=all_artifacts,
+        selected_line_ids=selection("selected_line_ids"),
+        selected_artifact_ids=selection("selected_artifact_ids"),
+    )
+    line_scope = {line.line_id for line in lines}
+    primary = choose_report_artifacts(lines, artifacts, report_profile.get('primary_artifacts'))
 
     # Formal delivery freezes source identities and the current project revision.
     ensure_full_source_hashes(
@@ -394,14 +437,20 @@ def generate_project_report_package(
     )
     state = load_project_state(store.root)
     software_version = _software_version()
-    source_rows_for_snapshot = [record.to_dict() for record in load_source_registry(store)]
+    source_rows_for_snapshot = [
+        record.to_dict() for record in load_source_registry(store) if record.line_id in line_scope
+    ]
 
-    spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts = _resolve_spatial_evidence(
-        store,
-        requested_id=str(report_profile.get("spatial_result_id") or ""),
-        enabled=section_flags["include_spatial_results"],
-        cancel_checker=cancel_checker,
+    spatial_result_id, spatial_record, spatial_manifest_path, spatial_manifest_sha256, input_artifacts = _resolve_scoped_spatial_evidence(
+        store, line_scope, report_profile.get('spatial_result_id'), section_flags['include_spatial_results'], cancel_checker,
     )
+    input_artifacts.extend({
+        'role': 'processing_result',
+        'primary': primary.get(record.line_id) is record,
+        'line_id': record.line_id, 'artifact_id': record.artifact_id,
+        'output_data_sha256': record.output_data_sha256,
+        'params_sha256': record.params_sha256, 'manifest_sha256': record.manifest_sha256,
+    } for record in artifacts)
     report_snapshot = ReportSnapshot.capture(
         project_id=store.manifest.project_id,
         project_revision=int(state.get("data_revision") or 0),
@@ -427,12 +476,6 @@ def generate_project_report_package(
     try:
         report(0, 10, "汇总项目、测线与处理记录")
         manifest = store.manifest
-        lines, artifacts = _select_report_scope(
-            store,
-            selected_line_ids=selected_line_ids,
-            selected_artifact_ids=selected_artifact_ids,
-        )
-        line_scope = {line.line_id for line in lines}
         artifact_rows = (
             [_artifact_to_row(record) for record in artifacts]
             if section_flags["include_processing_history"] else []
@@ -529,7 +572,7 @@ def generate_project_report_package(
                 "spatial_stale_at_capture": bool(getattr(spatial_record, "stale", False)),
             },
             "preflight_warnings": list(report_profile.get("preflight_warnings") or []),
-            "lifecycle": {"state": "draft", "sealed": False, "approval_status": "工作草稿"},
+            "lifecycle": {"state": "draft", "sealed": False},
         }
 
         line_csv = tables_dir / "line_manifest.csv"
@@ -561,18 +604,46 @@ def generate_project_report_package(
         _atomic_write_csv(borehole_csv, ["borehole_id", "line_id", "trace_index", "borehole_depth_m", "interpreted_sample", "interpreted_depth_m", "error_m", "absolute_error_m", "threshold_m", "passed", "status"], borehole_rows)
 
         report(3, 10, "生成工程图件")
-        figure_paths = []
-        if section_flags["include_bscan_images"] or section_flags["include_spatial_results"]:
-            figure_paths = _write_report_figures(
-                store,
-                figures_dir,
-                line_ids={line.line_id for line in lines} if section_flags["include_bscan_images"] else set(),
-                include_plan_map=section_flags["include_spatial_results"] and not selected_line_ids,
-                cancel_checker=cancel_checker,
-                progress_callback=lambda current, total, message: progress_callback(current, max(total, 1), message) if progress_callback is not None else None,
-            )
+        selected_markers = [doc for doc in marker_documents if doc['line_id'] in line_scope]
+        dossiers, figure_paths, plan_name, map_note, record_codes = build_line_dossiers(
+            store, lines, primary, all_artifacts, selected_markers,
+            report_profile, project_payload, quality_rows, section_flags, figures_dir,
+            check_cancel, progress_callback,
+        )
+        narrative = report_profile.get('project_analysis') or {}
+        summary['project_analysis'] = {
+            key: str(narrative.get(key) or '').strip() for key in ('objective', 'findings', 'conclusion')
+        }
+        summary['line_dossiers'] = dossiers
+        summary['plan_map'] = plan_name
+        summary['plan_map_note'] = map_note
+        acquisition_csv = tables_dir / 'acquisition_parameters.csv'
+        acquisition_table = [{'测线': item['line_id'], **item['acquisition']} for item in dossiers]
+        _atomic_write_csv(acquisition_csv,
+                          list(acquisition_table[0]) if acquisition_table else ['测线'], acquisition_table)
+        store.write_json(json_dir / 'line_dossiers.json', {
+            'project_analysis': summary['project_analysis'], 'plan_map': plan_name,
+            'plan_map_note': map_note, 'lines': dossiers,
+        })
+        processing_json = json_dir / 'processing_parameters.json'
+        if section_flags['include_processing_history']:
+            store.write_json(processing_json, {
+                'selected_versions': [record.to_dict() for record in artifacts],
+                'primary_chains': {item['line_id']: item['processing'] for item in dossiers},
+            })
+        marker_rows = delivery_rows(selected_markers)
+        for row in marker_rows:
+            row['图件编号'] = record_codes.get(row['ID'], '')
+        store.write_json(json_dir / 'markers.json', {'documents': selected_markers})
+        _atomic_write_csv(json_dir / 'markers.csv', [
+            '测线', 'ID', '图件编号', '名称', '类型', '用途', '版本', '信息来源', '道号范围', '数据版本',
+            '开始采集时间（UTC）', '结束采集时间（UTC）', '状态', '备注', '完整记录',
+        ], marker_rows)
+        summary['marker_rows'] = marker_rows
 
         summary["files"] = {
+            "acquisition_parameters_csv": _safe_rel(final_path(acquisition_csv), store.root),
+            "line_dossiers_json": _safe_rel(final_path(json_dir / 'line_dossiers.json'), store.root),
             "line_manifest_csv": _safe_rel(final_path(line_csv), store.root),
             "quality_summary_csv": _safe_rel(final_path(quality_csv), store.root),
             "basal_interface_summary_csv": _safe_rel(final_path(interfaces_csv), store.root),
@@ -589,6 +660,8 @@ def generate_project_report_package(
             "file_audit_csv": _safe_rel(final_path(audit_csv), store.root),
             "figures_dir": _safe_rel(final_path(figures_dir), store.root),
         }
+        if processing_json.exists():
+            summary['files']['processing_parameters_json'] = _safe_rel(final_path(processing_json), store.root)
         store.write_json(summary_json, summary)
 
         report(5, 10, "生成 Excel 工程汇总")
@@ -599,6 +672,8 @@ def generate_project_report_package(
                 ("测线清单", line_rows), ("数据质检", quality_rows), ("传感器同步", sensor_sync_rows),
                 ("基覆界面", interface_rows), ("处理记录", artifact_rows), ("空间成果", spatial_rows),
                 ("GIS图层", gis_rows), ("钻孔对比", borehole_rows), ("历史点目标", target_rows),
+                ("标记与区间", marker_rows),
+                ("采集参数", acquisition_table),
             ],
         )
 
@@ -607,14 +682,11 @@ def generate_project_report_package(
             html_report, summary=summary, lines=line_rows, quality=quality_rows,
             interfaces=interface_rows, targets=target_rows, artifacts=artifact_rows,
             spatial=spatial_rows, sensor_sync=sensor_sync_rows, gis_layers=gis_rows,
-            boreholes=borehole_rows, figure_paths=figure_paths,
+            boreholes=borehole_rows,
         )
         report(7, 10, "生成 PDF 正式报告")
         _write_pdf_report(
-            pdf_report, summary=summary, lines=line_rows, quality=quality_rows,
-            interfaces=interface_rows, targets=target_rows, artifacts=artifact_rows,
-            spatial=spatial_rows, sensor_sync=sensor_sync_rows, gis_layers=gis_rows,
-            boreholes=borehole_rows, figure_paths=figure_paths,
+            pdf_report, summary=summary, boreholes=borehole_rows, figure_paths=figure_paths,
         )
 
         # The manifest is written before hashing so it is itself covered by checksums.
@@ -650,7 +722,12 @@ def generate_project_report_package(
             file_count=planned_file_count,
             generated_at=generated_at,
         )
-        document_sections: list[ReportSection] = []
+        document_sections = [
+            ReportSection('survey', '项目摘要', summary['project_analysis']),
+            ReportSection('route', '测线布设', {'map': plan_name, 'note': map_note}),
+            ReportSection('line_dossiers', '逐测线成果', {'lines': dossiers}),
+        ]
+        document_sections.append(ReportSection('markers', '标记与事件区间', {'documents': selected_markers}))
         if section_flags["include_project_summary"]:
             document_sections.extend((
                 ReportSection("project", "项目概况", project_payload),
@@ -672,12 +749,10 @@ def generate_project_report_package(
         )
         store.write_json(json_dir / "report_document.json", report_document.to_dict())
 
-        approval_status = "已批准" if summary["approval"].get("approver") else ("待批准" if summary["approval"].get("reviewer") else "工作草稿")
         seal_path = package_dir / "report_seal.json"
         summary["lifecycle"] = {
             "state": "sealed",
             "sealed": True,
-            "approval_status": approval_status,
             "seal_path": _safe_rel(final_path(seal_path), store.root),
             "snapshot_id": report_snapshot.snapshot_id,
             "project_revision": report_snapshot.project_revision,
@@ -739,7 +814,6 @@ def generate_project_report_package(
             "snapshot_id": report_snapshot.snapshot_id,
             "project_revision": report_snapshot.project_revision,
             "spatial_result_id": spatial_result_id,
-            "approval_status": approval_status,
             "latest_package_dir": result.package_dir,
             "latest_manifest_path": result.manifest_path,
             "latest_html_path": result.html_path,

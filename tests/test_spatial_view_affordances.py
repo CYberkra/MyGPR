@@ -138,6 +138,18 @@ class TestView3dCardCollapse:
 
 
 class TestRightColumnTopAligned:
+    @pytest.fixture(autouse=True)
+    def track_for_detail_cards(self, spatial, qapp):
+        from mygpr.domain.spatial.models import SpatialTrack, SpatialTrackPoint
+
+        spatial.set_auto_prefetch_enabled(False)
+        spatial.set_tracks([SpatialTrack('L01', '一号测线', (
+            SpatialTrackPoint(0, 500000.0, 4000000.0),
+            SpatialTrackPoint(1, 500001.0, 4000001.0),
+        ), 'EPSG:32648')])
+        spatial._line_list.setCurrentRow(0)
+        settle(qapp)
+
     def test_cards_not_stretched_to_half(self, spatial, qapp):
         """两卡按内容贴顶——不再各占一半高度。"""
         from qfluentwidgets import CardWidget
@@ -168,3 +180,11 @@ class TestRightColumnTopAligned:
         assert gap > spatial._right_panel.height() * 0.3, (
             f'栏底留白应占三成以上，实际 {gap}px / '
             f'{spatial._right_panel.height()}px')
+
+
+def test_spatial_empty_details_release_canvas_width(spatial):
+    assert spatial._right_panel.isHidden()
+    spatial._spatial_results_btn.click()
+    assert not spatial._right_panel.isHidden()
+    spatial._spatial_results_btn.click()
+    assert spatial._right_panel.isHidden()

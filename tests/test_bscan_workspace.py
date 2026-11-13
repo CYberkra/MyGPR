@@ -11,7 +11,7 @@ pytest.importorskip('PyQt6')
 
 from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent
-from PyQt6.QtTest import QTest, QSignalSpy
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QLineEdit, QSplitter, QTabBar, QVBoxLayout, QWidget
 
 from ui.widgets.bscan_workspace import BScanWorkspace
@@ -256,13 +256,20 @@ def test_tab_context_menu_never_activates_target_and_delegates_business_actions(
     workspace.set_sources(sources('raw', 'A'))
     workspace.open_source('raw')
     workspace.open_source('A')
+    from ui.widgets.object_context_menu import object_action
+
     requests = []
-    workspace.source_context_requested.connect(lambda *args: requests.append(args))
-    menu = workspace.create_context_menu(key='raw', global_pos=QPoint(81, 92))
+
+    def add_source_actions(menu, key, group_id, guard):
+        object_action(menu, 'source-info', '参数与来源…', lambda: guard(lambda: requests.append((group_id, key))))
+
+    workspace.source_menu_actions = add_source_actions
+    menu = workspace.create_context_menu(key='raw')
     assert workspace.active_key() == 'A'
-    action(menu, 'source-context').trigger()
-    assert requests == [('raw', QPoint(81, 92))]
+    action(menu, 'source-info').trigger()
+    assert requests == [(workspace.group_ids()[0], 'raw')]
     assert workspace.active_key() == 'A'
+    assert not any(a.data() in ('link-views', 'reset-layout') for a in menu.actions())
     action(menu, 'pin').trigger()
     pinned_menu = workspace.create_context_menu(key='raw')
     assert not action(pinned_menu, 'close').isEnabled()
@@ -389,24 +396,24 @@ def test_split_group_display_and_fit_buttons_target_only_their_own_view(workspac
     second = workspace.split_source('B', 'right')
     first_group, second_group = workspace.group_widget(first), workspace.group_widget(second)
     fits = {first: [], second: []}
-    monkeypatch.setattr(first_group.view, 'fit_to_data', lambda: fits[first].append(1))
-    monkeypatch.setattr(second_group.view, 'fit_to_data', lambda: fits[second].append(1))
+    monkeypatch.setattr(first_group.view, 'fit_all', lambda: fits[first].append(1))
+    monkeypatch.setattr(second_group.view, 'fit_all', lambda: fits[second].append(1))
     second_group.fit_view.click()
     assert fits[second] == [1]
     assert fits[first] == []
-    first_spy = QSignalSpy(first_group.view.sig_display_settings_requested)
-    second_spy = QSignalSpy(second_group.view.sig_display_settings_requested)
+    opened = []
+    monkeypatch.setattr(first_group.view, 'show_display_menu', lambda _pos: opened.append(first))
+    monkeypatch.setattr(second_group.view, 'show_display_menu', lambda _pos: opened.append(second))
     second_group.display_settings.click()
-    assert len(second_spy) == 1
-    assert len(first_spy) == 0
+    assert opened == [second]
 
 
 def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qapp):
     group = workspace.group_widget(workspace.group_ids()[0])
     header = group.display_settings.parentWidget().layout().itemAt(0).layout()
-    assert header.indexOf(group.markers_visibility) == header.indexOf(group.display_settings) - 1
+    assert header.indexOf(group.marker_menu) == header.indexOf(group.display_settings) - 1
     qapp.processEvents()
-    assert group.markers_visibility.geometry().center().y() == group.display_settings.geometry().center().y()
+    assert group.marker_menu.geometry().center().y() == group.display_settings.geometry().center().y()
     assert not group.markers_visibility.isEnabled()
     workspace.set_sources([dict(key='A', title='A', bundle=bundle())])
     workspace.open_source('A')
@@ -420,6 +427,19 @@ def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qap
     assert not group.view.acquisition_markers_shown()
     group.markers_visibility.click()
     assert group.view.acquisition_markers_shown()
+
+
+def test_compact_group_keeps_display_and_fit_commands_reachable(workspace):
+    from ui.widgets.context_menus import make_menu
+
+    workspace.set_sources(sources('A'))
+    workspace.open_source('A')
+    group = workspace.group_widget()
+    group.resize(250, 300)
+    assert group.fit_view.isHidden() and group.display_settings.isHidden()
+    menu = workspace._populate_group_menu(make_menu(workspace), group)
+    assert {'fit-all', 'view-display'} <= {action.data() for action in menu.actions()}
+    menu.deleteLater()
 
 
 def test_split_groups_toggle_acquisition_markers_independently(workspace):
@@ -479,7 +499,7 @@ def test_fluent_menu_keyboard_opens_submenu_and_executes_split(workspace, qapp):
     QTest.keyClick(menu.view, Qt.Key.Key_Down)  # pin
     QTest.keyClick(menu.view, Qt.Key.Key_Down)  # arrange submenu
     QTest.keyClick(menu.view, Qt.Key.Key_Right)
-    submenu = next(m for m in menu._subMenus if m.title() == '排列与拆分')
+    submenu = next(m for m in menu._subMenus if m.title() == '分组布局')
     assert submenu.isVisible()
     QTest.keyClick(submenu.view, Qt.Key.Key_Down)  # split right
     QTest.keyClick(submenu.view, Qt.Key.Key_Return)

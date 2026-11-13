@@ -98,6 +98,18 @@ class MyGPRBackend:
             setattr(self.projects, "_maintenance_service", ProjectMaintenanceService(self.projects))
 
     @property
+    def markers(self):
+        from mygpr.application.project.marker_service import MarkerService
+        return MarkerService(self.projects)
+
+    def submit_marker_selection(self, preview):
+        from copy import deepcopy
+        snapshot = deepcopy(preview)
+        title = ('保留' if snapshot['mode'] == 'keep' else '剔除') + '事件区间'
+        return self._submit_project_job(snapshot['project_id'], title,
+            lambda context: self.markers.execute(snapshot, context=context))
+
+    @property
     def maintenance(self) -> ProjectMaintenanceService:
         service = getattr(self.projects, "_maintenance_service", None)
         if service is None:

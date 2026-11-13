@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip('PyQt6')
 
-from PyQt6.QtCore import QCoreApplication, QEvent, QRunnable
+from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRunnable
 
 
 def _offline_workers(monkeypatch):
@@ -83,6 +83,30 @@ def test_mapped_tracks_enable_basemap_and_clearing_tracks_hides_layers(qapp, mon
         qapp.processEvents()
         assert not view._layer.isVisible()
         assert view._overlay_layer is None or not view._overlay_layer.isVisible()
+    finally:
+        _delete(view, qapp)
+
+
+def test_map_menu_uses_the_hit_track_without_mutating_its_plot_data(qapp, monkeypatch):
+    from ui.widgets import map_view
+
+    _offline_workers(monkeypatch)
+    view = map_view.MapView()
+    hits = []
+    view.add_line_menu_actions = lambda _menu, line_id: hits.append(line_id)
+    monkeypatch.setattr(map_view, 'show_menu', lambda menu, _pos: menu.deleteLater())
+    try:
+        view.resize(800, 500)
+        view.show()
+        view.set_tracks([_track()])
+        qapp.processEvents()
+        info = view.track_summaries()[0]
+        line = view._track_items[0]
+        scene = view._plot.vb.mapViewToScene(QPointF(info['xs'][0], info['ys'][0]))
+        view._show_map_menu(QPoint(), scene)
+        assert hits == ['L01']
+        assert list(line.xData) == list(info['xs'])
+        assert list(line.yData) == list(info['ys'])
     finally:
         _delete(view, qapp)
 

@@ -28,6 +28,7 @@ class ProjectReadOnlyError(ProjectApplicationError):
 # 输出 header 中需要持久化的轴标量（P1-1：形状变更方法如 time_cut/set_zero_time
 # 会改变时间窗与零点，若不保存，二次处理/成像的物理轴会按原始时窗错误计算）
 _OUTPUT_HEADER_KEYS = (
+    "marker_source_id", "marker_mapping_kind", "marker_maps",
     "total_time_ns", "time_window_ns", "time_cut_offset_ns",
     "a_scan_length", "num_traces", "dielectric_constant", "axis_transform",
     "time_axis_endpoint", "time_step_s", "distance_axis_status",
@@ -191,12 +192,16 @@ class ProjectProcessingService:
                 context.child(1, 2),
             )
 
+        trace_metadata = (self._projects.read_artifact_trace_metadata(project_id, line_id, input_artifact_id)
+                          if input_artifact_id else self._projects.read_trace_metadata(project_id, line_id)) or {}
+        self._init_marker_mapping(project_id, line_id, input_artifact_id, header, trace_metadata, info.shape[1])
+        from types import SimpleNamespace
+        from mygpr.domain.markers.continuity import require_continuity
+        for step in pipeline.steps:
+            if step.enabled:
+                require_continuity(SimpleNamespace(method_id=step.method_id, trace_metadata=trace_metadata, header_info=header))
         return self._processing.execute_pipeline_blocks(
-            source,
-            pipeline,
-            header_info=header,
-            trace_metadata=(self._projects.read_artifact_trace_metadata(project_id, line_id, input_artifact_id)
-                            if input_artifact_id else self._projects.read_trace_metadata(project_id, line_id)),
+            source, pipeline, header_info=header, trace_metadata=trace_metadata,
             consumer=save_result,
             context=context.child(0, 2),
         )
@@ -228,6 +233,8 @@ class ProjectProcessingService:
             self._projects.read_artifact_dataset(project_id, line_id, input_artifact_id)
             if input_artifact_id else self._projects.read_dataset(project_id, line_id)
         )
+        self._init_marker_mapping(project_id, line_id, input_artifact_id,
+                                  source.header_info, source.trace_metadata, source.data.shape[1])
         result = self._processing.execute_pipeline(
             source.data,
             pipeline,
@@ -349,6 +356,14 @@ class ProjectProcessingService:
             context=context,
             trace_metadata=summary.trace_metadata,
         )
+
+    def _init_marker_mapping(self, project_id, line_id, artifact_id, header, trace_metadata, count):
+        if not self._projects.get_summary(project_id).storage_backend.startswith('hybrid'):
+            return
+        from mygpr.domain.markers.mapping import add_source_mapping
+        source_id = ('artifact:' + artifact_id if artifact_id
+                     else self._projects.marker_source_id(project_id, line_id))
+        add_source_mapping(header, trace_metadata, source_id, count)
 
     @staticmethod
     def _header_from_info(info: LineDatasetInfo) -> dict[str, Any]:

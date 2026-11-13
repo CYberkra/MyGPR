@@ -1,17 +1,11 @@
 # -*- coding: utf-8 -*-
-"""JobsPage — 任务中心（SPEC §6.8）。
-
-卡内：清理操作 + JobTable(stretch)，不重复页面导航标题。
-页面为 JobTable 的薄包装：暴露 job_table() 访问器，
-转发 cancel_requested，并在清理时发 prune_requested。
-"""
+"""Job controls hosted in the output panel."""
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import PushButton
+from qfluentwidgets import ComboBox, PushButton
 
 from ui import constants
-from ui.page_scaffold import make_card
 from ui.widgets import JobTable
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action, object_menu, show_details
 
@@ -30,22 +24,23 @@ class JobsPage(QWidget):
     # ============================================================ UI 构建
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(*constants.PAGE_MARGINS)
-        root.setSpacing(constants.PAGE_SPACING)
-
-        card, card_layout = make_card(parent=self)
+        root.setContentsMargins(8, 2, 8, 4)
+        root.setSpacing(4)
 
         button_row = QHBoxLayout()
         button_row.setSpacing(constants.CARD_SPACING)
-        self._prune_btn = PushButton('清理已完成', card)
-        self._prune_btn.setToolTip('清除已完成/失败的任务行')
-        button_row.addWidget(self._prune_btn)
+        self._filter = ComboBox(self)
+        self._filter.addItem('进行中与失败', userData=('queued', 'running', 'failed'))
+        self._filter.addItem('全部任务', userData=None)
+        self._filter.addItem('已结束', userData=('completed', 'cancelled', 'failed'))
+        button_row.addWidget(self._filter)
         button_row.addStretch(1)
-        card_layout.addLayout(button_row)
-
-        self._job_table = JobTable(card)
-        card_layout.addWidget(self._job_table, 1)
-        root.addWidget(card, 1)
+        self._prune_btn = PushButton('清理已结束记录', self)
+        self._prune_btn.setToolTip('从列表清除已结束任务记录')
+        button_row.addWidget(self._prune_btn)
+        root.addLayout(button_row)
+        self._job_table = JobTable(self)
+        root.addWidget(self._job_table, 1)
 
     # ============================================================ 内部接线
     def _connect_internal(self) -> None:
@@ -53,6 +48,8 @@ class JobsPage(QWidget):
         self._job_table.rows_changed.connect(self._job_context.close)
         self._job_table.cancel_requested.connect(self.cancel_requested)
         self._prune_btn.clicked.connect(self._on_prune_clicked)
+        self._filter.currentIndexChanged.connect(self._update_filter)
+        self._update_filter()
         # 没有终态任务时按钮禁用：否则点了没反应（空表/全是运行中）
         self._job_table.rows_changed.connect(self._sync_prune_enabled)
         self._sync_prune_enabled()
@@ -62,12 +59,16 @@ class JobsPage(QWidget):
         """JobTable 访问器：主窗口经其 upsert/update_progress/set_status。"""
         return self._job_table
 
+    def _update_filter(self):
+        self._job_table.set_visible_statuses(self._filter.currentData())
+
     # ============================================================ 内部逻辑
     def _sync_prune_enabled(self) -> None:
         """按终态任务数同步「清理已完成」可用态（无可清理 → 禁用）。"""
         counter = getattr(self._job_table, 'finished_count', None)
         count = int(counter()) if callable(counter) else 0
         self._prune_btn.setEnabled(count > 0)
+        self._prune_btn.setVisible(count > 0)
 
     def _on_prune_clicked(self) -> None:
         """清理已完成：本地移除终态行并发 prune_requested。"""
@@ -83,11 +84,13 @@ class JobsPage(QWidget):
             snapshot = self._job_table.job_snapshot(job_id)
             title = snapshot['title']
             message = snapshot['message']
-            status = snapshot['status']
-            text = f'任务标识: {job_id}\n标题: {title}\n状态: {status}\n消息: {message}'
-            object_action(menu, 'job-details', '详情与当前消息…',
+            status = snapshot['status_text']
+            text = f'{title}\n状态：{status}\n任务编号：{job_id}'
+            if message:
+                text += f'\n\n{message}'
+            object_action(menu, 'job-details', '任务详情…',
                           lambda: show_details(self, '任务详情', text))
-            object_action(menu, 'copy-id', '复制任务标识',
+            object_action(menu, 'copy-id', '复制任务编号',
                           lambda: QApplication.clipboard().setText(job_id))
             object_action(menu, 'copy-message', '复制当前消息',
                           lambda: QApplication.clipboard().setText(message),
@@ -96,11 +99,4 @@ class JobsPage(QWidget):
             object_action(menu, 'cancel-job', '取消任务',
                           lambda: self._job_table.cancel_job(job_id),
                           enabled=self._job_table.can_cancel(job_id), reason='任务已结束或不可取消')
-            object_action(menu, 'retry-job', '重试任务', lambda: None,
-                          enabled=False, reason='未接通可重放任务合同')
-            object_action(menu, 'remove-job', '移除此任务记录', lambda: None,
-                          enabled=False, reason='当前仅支持清理全部终态记录')
-            menu.addSeparator()
-        object_action(menu, 'prune-jobs', '清理全部终态任务记录', self._prune_btn.click,
-                      enabled=self._prune_btn.isEnabled(), reason='没有可清理的终态任务')
         return menu

@@ -48,12 +48,16 @@ def test_job_table_exposes_safe_row_actions(qapp):
     table.deleteLater()
 
 
-def test_chain_strip_empty_hint_has_a_public_setter(qapp):
+def test_empty_chain_has_one_clickable_add_action(qapp):
     from ui.widgets.chain_strip import ChainStrip
 
     strip = ChainStrip()
-    strip.set_empty_hint('＋ 添加处理步骤')
-    assert strip._empty_hint.text() == '＋ 添加处理步骤'
+    requests = []
+    strip.sig_add_requested.connect(lambda: requests.append(True))
+    assert strip.add_button().text() == '添加步骤'
+    assert strip._add_btn.isHidden()
+    strip.add_button().click()
+    assert requests == [True]
     strip.deleteLater()
 
 

@@ -132,22 +132,18 @@ def test_adjacent_manual_windows_do_not_double_count_a_boundary_impulse():
 
 def test_old_manual_parameters_remain_manual_when_loaded_into_new_editor(qapp):
     from ui.pages.processing_steps import ProcessingSteps
-    from ui.widgets.step_editor import StepEditorPopup
+    from ui.pages.processing_page import ProcessingPage
     from ui.controllers.processing_controller import build_method_dicts
     from ui.desktop_backend_facade import method_catalog
 
     old = {"method_id": "short_trace_repair", "params": {"time_windows_ns": "0:100;100:200;250:850", "mode": "mark"}}
     normalized = ProcessingSteps._editor_parameters(old)
     assert normalized["window_mode"] == "manual" and "window_mode" not in old["params"]
-    schema = next(m for m in build_method_dicts(method_catalog()) if m["method_id"] == "short_trace_repair")[
-        "parameter_schema"
-    ]
-    editor = StepEditorPopup()
-    editor.load_snapshot(
-        0, {"title": "test", "method_id": "short_trace_repair", "params": normalized, "schema": schema}
-    )
-    assert editor._form.values()["window_mode"] == "manual"
-    editor.close()
+    page = ProcessingPage()
+    page.set_methods(build_method_dicts(method_catalog()))
+    page._pipeline_list.add_step(old["method_id"], "test", old["params"])
+    assert page._param_form.values()["window_mode"] == "manual"
+    page.close()
 
 
 def test_synthetic_real_target_in_all_auto_windows_still_exposes_false_positive_limit():

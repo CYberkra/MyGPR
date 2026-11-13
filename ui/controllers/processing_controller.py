@@ -90,6 +90,8 @@ class ProcessingController(QObject):
     gain_input_ready = pyqtSignal(str, object, str)
     methods_loaded = pyqtSignal(list)       # list[dict], see build_method_dicts
     run_submitted = pyqtSignal(str)         # job_id
+    pipeline_job_registered = pyqtSignal(str, dict)
+    pipeline_job_rejected = pyqtSignal(dict, str)
     run_finished = pyqtSignal(bool, str)    # success, message
     run_context_finished = pyqtSignal(str, bool, str)  # submitted job_id, success, message
     run_result_ready = pyqtSignal(str, str)  # submitted job_id, actual final artifact_id
@@ -214,19 +216,29 @@ class ProcessingController(QObject):
         input_artifact_id: str = "",
         save_intermediates: bool = False,
     ) -> str | None:
+        context = {
+            'project_id': str(project_id), 'line_id': str(line_id),
+            'input_artifact_id': str(input_artifact_id or ''),
+            'steps': [],
+            'result_name': str(result_name or ''),
+            'save_intermediates': bool(save_intermediates),
+        }
         backend = self._backend()
         bridge = self._job_bridge()
         if backend is None or bridge is None:
+            self.pipeline_job_rejected.emit(context, '后端尚未就绪')
             return None
         try:
+            context['steps'] = list(dict(pipeline_def or {}).get('steps', []))
             ui_pipeline = pipeline_from_dicts(
-                list(dict(pipeline_def or {}).get("steps", [])),
+                context['steps'],
                 name=str(result_name or dict(pipeline_def or {}).get("name", "")),
             )
             pipeline = pipeline_to_raw(ui_pipeline)
         except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链定义无效：{message}")
+            self.pipeline_job_rejected.emit(context, message)
             self.run_context_finished.emit('', False, message)
             self.run_finished.emit(False, message)
             return None
@@ -242,10 +254,12 @@ class ProcessingController(QObject):
         except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             self.log_message.emit(f"处理链提交失败：{message}")
+            self.pipeline_job_rejected.emit(context, message)
             self.run_context_finished.emit('', False, message)
             self.run_finished.emit(False, message)
             return None
         self.log_message.emit(f"处理链已提交：{line_id}（{len(ui_pipeline.steps)} 步）")
+        self.pipeline_job_registered.emit(str(job_id), context)
         self.run_submitted.emit(job_id)
         def finished(success, message, result):
             if success:

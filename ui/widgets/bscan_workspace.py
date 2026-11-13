@@ -2,8 +2,7 @@
 
 Each group owns one reusable BScanView. Tabs and duplicated groups refer to the
 same PreviewBundle; layout/closed-tab history contains only IDs and view state.
-Business actions are delegated through source_context_requested, after choosing
-the explicit ``来源操作…`` command in the standard view menu.
+The host contributes source commands to the tab menu.
 """
 from __future__ import annotations
 
@@ -21,15 +20,15 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     FluentIcon as FIF, RoundMenu, Theme, ToolButton,
-    TransparentToolButton, isDarkTheme,
+    TransparentPushButton, TransparentToolButton, isDarkTheme,
 )
 
 from ui import constants, motion
 from ui.design_tokens import color, rgba
-from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.bscan_preview_status import _PreviewStatus
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import make_menu, show_menu
+from ui.widgets.object_context_menu import object_action
 from ui.widgets.bscan_link import compatible
 from ui.widgets.bscan_workspace_link import BScanWorkspaceLink
 from ui.widgets.bscan_source_tabs import _SourceTabBar
@@ -69,21 +68,24 @@ class _ViewGroup(QWidget):
         self.markers_visibility.setCheckable(True)
         self.markers_visibility.setChecked(True)
         self.markers_visibility.setEnabled(False)
-        self.markers_visibility.setToolTip('显示／隐藏采集标记')
-        self.markers_visibility.setAccessibleName('显示采集标记')
+        self.markers_visibility.setToolTip('显示或隐藏图上标记')
+        self.markers_visibility.setAccessibleName('显示图上标记')
         self.display_settings = TransparentToolButton(FIF.SETTING, self)
         self.display_settings.setFixedSize(*constants.TOOL_BTN_SIZE)
-        self.display_settings.setToolTip('全局显示设置')
-        self.display_settings.setAccessibleName('全局显示设置')
-        self.fit_view = TransparentToolButton(FIF.ZOOM, self)
+        self.display_settings.setToolTip('当前视图显示设置')
+        self.display_settings.setAccessibleName('当前视图显示设置')
+        self.fit_view = TransparentToolButton(FIF.FIT_PAGE, self)
         self.fit_view.setFixedSize(*constants.TOOL_BTN_SIZE)
-        self.fit_view.setToolTip('适应当前视图')
-        self.fit_view.setAccessibleName('适应当前视图')
+        self.fit_view.setToolTip('适应全图')
+        self.fit_view.setAccessibleName('适应全图')
         header = QHBoxLayout()
         header.setContentsMargins(2, 0, 2, 0)
         header.setSpacing(2)
         header.addWidget(self.tabs, 1)
-        header.addWidget(self.markers_visibility)
+        self.marker_menu = TransparentPushButton('标记 ▾', self)
+        self.marker_menu.setFixedHeight(constants.TOOL_BTN_SIZE[1])
+        self.marker_menu.clicked.connect(lambda: workspace.marker_tools.menu(self.view, self.marker_menu.mapToGlobal(QPoint(0, self.marker_menu.height()))))
+        header.addWidget(self.marker_menu)
         header.addWidget(self.display_settings)
         header.addWidget(self.fit_view)
         header.addWidget(self.more)
@@ -92,8 +94,9 @@ class _ViewGroup(QWidget):
         self.markers_visibility.toggled.connect(self.view.set_acquisition_markers_visible)
         self.view.sig_acquisition_markers_availability_changed.connect(
             self.markers_visibility.setEnabled)
-        self.display_settings.clicked.connect(self.view.sig_display_settings_requested.emit)
-        self.fit_view.clicked.connect(lambda: self.view.fit_to_data())
+        self.display_settings.clicked.connect(lambda: self.view.show_display_menu(
+            self.display_settings.mapToGlobal(self.display_settings.rect().bottomLeft())))
+        self.fit_view.clicked.connect(lambda: self.view.fit_all())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
         layout.setSpacing(0)
@@ -117,11 +120,17 @@ class _ViewGroup(QWidget):
         self.tabs.tabBarClicked.connect(lambda index: workspace._tab_clicked(self, index))
         self.tabs.tabCloseRequested.connect(
             lambda index: workspace.close_tab(self.tabs.tabData(index), self.group_id))
-        self.more.clicked.connect(lambda: workspace.show_context_menu(
-            self.group_id, self.current_key(), self.more.mapToGlobal(QPoint(0, self.more.height()))))
+        self.more.clicked.connect(lambda: workspace.show_group_menu(
+            self, self.more.mapToGlobal(self.more.rect().bottomLeft())))
         for child in [self, *self.findChildren(QWidget)]:
             child.setAcceptDrops(True)
             child.installEventFilter(workspace)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        compact = event.size().width() < 280
+        self.display_settings.setVisible(not compact)
+        self.fit_view.setVisible(not compact)
 
     def set_hint_visible(self, visible):
         self.hint_animation.stop()
@@ -162,8 +171,6 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
     source_closed = pyqtSignal(str)
     preview_requested = pyqtSignal(str)
     preview_retry_requested = pyqtSignal(str)
-    source_context_requested = pyqtSignal(str, object)
-    source_input_requested = pyqtSignal(str)
     view_created = pyqtSignal(object)
     layout_changed = pyqtSignal()
     selection_step_requested = pyqtSignal(str, str, str)
@@ -186,9 +193,13 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         self._link_enabled = False
         self._link_busy = False
         self.selection_step_allowed = None
+        self.source_menu_actions = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
+        from ui.widgets.marker_workspace_tools import MarkerWorkspaceTools
+        self.marker_tools = MarkerWorkspaceTools(self, self.views, lambda: self._group().view if self._group() else None,
+                                                 allow_processing=True)
         self._root = self._new_group()
         self._layout.addWidget(self._root)
         self._active_group = self._root.group_id
@@ -200,7 +211,6 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             ('Ctrl+Shift+Tab', lambda: self._cycle_tab(-1)),
             ('Ctrl+Alt+Right', lambda: self.split_source(self.active_key(), 'right')),
             ('Ctrl+Alt+Down', lambda: self.split_source(self.active_key(), 'bottom')),
-            ('Shift+F10', self._keyboard_menu), ('Menu', self._keyboard_menu),
             ('Escape', self.cancel_drag),
         ):
             shortcut = QShortcut(QKeySequence(key), self)
@@ -227,6 +237,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             group_id = f'group-{self._counter}'
         group = _ViewGroup(self, group_id)
         self._groups[group_id] = group
+        self.marker_tools.connect_view(group.view)
+        group.view._canvas_menu_sections.append(lambda menu, pos: self._add_selection_commands(group, menu, pos))
         group.view._plot.vb.sigRangeChanged.connect(lambda *_args: self._link_range(group))
         group.view._glw.scene().sigMouseMoved.connect(lambda pos: self._link_cursor(group, pos))
         self.view_created.emit(group.view)
@@ -341,6 +353,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         if active != self._last_active:
             self._last_active = active
             self.active_changed.emit(active[1])
+        if self.marker_tools.panel:
+            self.marker_tools.sync_view(self._group().view)
         self.layout_changed.emit()
 
     def _render(self, group):
@@ -674,118 +688,142 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         if group.tabs.count():
             group.tabs.setCurrentIndex((group.tabs.currentIndex() + direction) % group.tabs.count())
 
-    def _keyboard_menu(self):
-        group = self._command_group()
-        point = group.tabs.tabRect(group.tabs.currentIndex()).bottomLeft()
-        self.show_context_menu(group.group_id, group.current_key(), group.tabs.mapToGlobal(point))
-
-    def create_context_menu(self, group_id=None, key=None, global_pos=None) -> RoundMenu:
-        """Frozen target identity; creating/opening menus has no selection effects."""
+    def create_context_menu(self, group_id=None, key=None) -> RoundMenu:
+        """A tab menu owns one source and its view group."""
         group = self._group(group_id)
+        menu = make_menu(self)
+        if group is None:
+            return menu
         gid = group.group_id
         key = group.current_key() if key is None else key
-        valid = key in group.keys()
-        position = QPoint(global_pos) if global_pos is not None else group.tabs.mapToGlobal(QPoint(8, 28))
-        menu = make_menu(self)
-        menu.setProperty('source_key', key)
+        if key not in group.keys():
+            return self._populate_group_menu(menu, group)
+        source = self._sources.get(key, {})
+        identity = tuple(source.get(field) for field in ('project_id', 'line_id', 'revision'))
 
-        def add(parent, command, text, slot, *, enabled=True, shortcut=''):
-            entry = add_action(parent, None, text, slot, enabled=enabled, shortcut=shortcut)
-            entry.setData(command)
-            return entry
+        def current(callback):
+            live = self._sources.get(key, {})
+            if (self._groups.get(gid) is group and key in group.keys()
+                    and identity == tuple(live.get(field) for field in ('project_id', 'line_id', 'revision'))):
+                callback()
 
-        if valid:
-            can_convert = bool(self.selection_step_allowed and self.selection_step_allowed(gid, key))
-            source_snapshot = self._sources[key]
-            selection_snapshot = (QRectF(group.view._view_selection)
-                                  if group.view._view_selection is not None else None)
+        def add(parent, command, label, callback, **kwargs):
+            return object_action(parent, command, label, lambda: current(callback), **kwargs)
 
-            def emit_selection(method):
-                current = self._sources.get(key, {})
-                live_group = self._groups.get(gid)
-                if (live_group is not group or current.get('bundle') is not source_snapshot.get('bundle')
-                        or any(current.get(field) != source_snapshot.get(field)
-                               for field in ('project_id', 'line_id', 'revision'))
-                        or group.view._view_selection != selection_snapshot):
-                    return
-                if self.selection_step_allowed and self.selection_step_allowed(gid, key):
-                    self.selection_step_requested.emit(gid, key, method)
-
-            add(menu, 'selection-crop', '框选范围加入测道裁剪' if can_convert else '框选转处理不可用：请选择当前输入并清空已有步骤',
-                lambda: emit_selection('trace_cut'), enabled=can_convert)
-            add(menu, 'selection-qc', '框选范围加入坏道标记',
-                lambda: emit_selection('trace_qc'), enabled=can_convert)
-            can_time = (can_convert and not group.view._showing_elevation
-                        and group.view._sample_axis is not None
-                        and 'ns' in group.view._sample_axis_label.lower())
-            add(menu, 'selection-crop-time', '框选范围加入道与时间裁剪' if can_time else '道与时间裁剪不可用：需要真实时间轴',
-                lambda: emit_selection('trace_cut_time'), enabled=can_time)
-            can_link = (group.view._matrix is not None and any(
-                compatible(group.view, target.view) for target in self._compatible_groups(group)))
-            link = add(menu, 'link-views', '联动同测线视图' if can_link else '联动不可用：需要兼容的来源和物理轴',
-                       self._set_link_enabled,
-                       enabled=can_link or self._link_enabled)
-            link.setCheckable(True)
-            link.setChecked(self._link_enabled)
-            reference = self._sources[key].get('comparison', False)
-            add(menu, 'activate', '设为处理输入' if reference else '从此结果继续处理',
-                lambda: self.source_input_requested.emit(key) if reference else self.open_source(key, gid))
-            pinned = self.is_pinned(key, gid)
-            pin = add(menu, 'pin', '取消固定标签' if pinned else '固定标签',
-                      lambda: self.set_pinned(key, not pinned, gid))
-            pin.setCheckable(True)
-            pin.setChecked(pinned)
-            split = RoundMenu('排列与拆分', menu)
-            for edge, name in _EDGE_NAMES.items():
-                add(split, f'split-{edge}', f'拆分到{name}' if len(group.keys()) > 1 else f'拆分到{name}（当前组只有一个标签）',
-                    lambda _checked=False, edge=edge: self.split_source(key, edge, gid), enabled=len(group.keys()) > 1)
-            split.addSeparator()
-            add(split, 'copy-right', '复制到右侧新组', lambda: self.split_source(key, 'right', gid, copy=True))
-            move = RoundMenu('移到其他视图组', split)
-            targets = [target for target in self.group_ids() if target != gid]
-            if not targets:
-                add(move, 'no-target', '没有其他视图组', lambda: None, enabled=False)
-            for target in targets:
-                add(move, f'move-{target}', f'视图组 {self.group_ids().index(target) + 1}',
-                    lambda _checked=False, target=target: self.move_source(key, target, gid))
-            split.addMenu(move)
-            menu.addMenu(split)
-            add(menu, 'close', '关闭标签（先取消固定）' if pinned else '关闭标签',
-                lambda: self.close_tab(key, gid), enabled=not pinned, shortcut='Ctrl+W')
-            ranges = RoundMenu('关闭范围', menu)
-            keys = group.keys()
-            for scope, text, candidates in (
-                ('others', '关闭其他标签', [k for k in keys if k != key]),
-                ('right', '关闭右侧标签', keys[keys.index(key) + 1:]),
-                ('unpinned', '关闭组内未固定标签', keys),
-            ):
-                add(ranges, f'close-{scope}', text,
-                    lambda _checked=False, scope=scope: self.close_tabs(scope, key, gid),
-                    enabled=any(k not in group.pinned for k in candidates))
-            menu.addMenu(ranges)
-            menu.addSeparator()
-            add(menu, 'source-context', '来源操作…',
-                lambda: self.source_context_requested.emit(key, position),
-                enabled=bool(self.receivers(self.source_context_requested)))
-        add(menu, 'reopen', '重新打开已关闭标签', self.reopen_closed,
-            enabled=bool(self._closed), shortcut='Ctrl+Shift+T')
-        add(menu, 'reset-layout', '恢复为单组标签', self.reset_layout,
-            enabled=len(self._groups) > 1)
+        if self.source_menu_actions:
+            self.source_menu_actions(menu, key, gid, current)
+        else:
+            add(menu, 'activate', '设为处理输入', lambda: self.open_source(key, gid))
         menu.addSeparator()
-        group.view.add_display_settings_action(menu)
-        menu._workspace_keyboard = FluentMenuKeyboard(menu)
+        pinned = self.is_pinned(key, gid)
+        pin = add(menu, 'pin', '固定标签', lambda: self.set_pinned(key, not pinned, gid))
+        pin.setCheckable(True)
+        pin.setChecked(pinned)
+        layout = RoundMenu('分组布局', menu)
+        for edge, name in _EDGE_NAMES.items():
+            add(layout, f'split-{edge}', f'拆分到{name}', lambda edge=edge: self.split_source(key, edge, gid),
+                enabled=len(group.keys()) > 1, reason='当前组只有一个标签')
+        add(layout, 'copy-right', '复制到右侧新组', lambda: self.split_source(key, 'right', gid, copy=True))
+        for index, target in enumerate(self.group_ids(), 1):
+            if target != gid:
+                add(layout, f'move-{target}', f'移到视图组 {index}',
+                    lambda target=target: self.move_source(key, target, gid))
+        menu.addMenu(layout)
+        add(menu, 'close', '关闭标签', lambda: self.close_tab(key, gid),
+            enabled=not pinned, reason='请先取消固定')
+        self._add_close_ranges(menu, group, key, add)
         return menu
 
-    def show_context_menu(self, group_id=None, key=None, global_pos=None):
-        self._close_menu()
-        group = self._group(group_id)
-        if group is None:
+    def _add_close_ranges(self, menu, group, key, add):
+        keys = group.keys()
+        ranges = RoundMenu('关闭范围', menu)
+        for scope, label, candidates in (
+            ('others', '关闭其他未固定标签', [k for k in keys if k != key]),
+            ('right', '关闭右侧未固定标签', keys[keys.index(key) + 1:]),
+        ):
+            def close(scope=scope):
+                if group.keys() == keys:
+                    self.close_tabs(scope, key, group.group_id)
+
+            add(ranges, f'close-{scope}', label, close,
+                enabled=any(k not in group.pinned for k in candidates))
+        menu.addMenu(ranges)
+
+    def _populate_group_menu(self, menu, group):
+        gid = group.group_id
+        keys = group.keys()
+        if keys:
+            opened = RoundMenu('本组已打开标签', menu)
+            for key in keys:
+                entry = object_action(opened, f'open-{key}', str(self._sources[key].get('title') or key),
+                    lambda _checked=False, key=key: self.open_source(key, gid)
+                    if self._groups.get(gid) is group and key in group.keys() else None)
+                entry.setCheckable(True)
+                entry.setChecked(key == group.current_key())
+            menu.addMenu(opened)
+        def compatible_view():
+            return self._groups.get(gid) is group and any(
+                compatible(group.view, target.view) for target in self._compatible_groups(group))
+        link = object_action(menu, 'link-views', '联动同测线视图',
+            lambda: self._set_link_enabled(not self._link_enabled) if self._link_enabled or compatible_view() else None,
+            enabled=self._link_enabled or compatible_view(), reason='需兼容来源与物理轴')
+        link.setCheckable(True)
+        link.setChecked(self._link_enabled)
+        object_action(menu, 'close-unpinned', '关闭本组未固定标签',
+                      lambda: self.close_tabs('unpinned', group_id=gid) if group.keys() == keys else None,
+                      enabled=any(key not in group.pinned for key in keys))
+        object_action(menu, 'reopen', '重新打开已关闭标签', self.reopen_closed, enabled=bool(self._closed))
+        object_action(menu, 'reset-layout', '恢复为单组标签', self.reset_layout,
+                      enabled=len(self._groups) > 1)
+        if group.fit_view.isHidden():
+            menu.addSeparator()
+            object_action(menu, 'fit-all', '适应全图', group.view.fit_all,
+                          enabled=group.view._image_shape is not None)
+            object_action(menu, 'view-display', '当前视图显示设置…', lambda: group.view.show_display_menu(
+                group.more.mapToGlobal(group.more.rect().bottomLeft())))
+        return menu
+
+    def _add_selection_commands(self, group, menu, _scene_pos):
+        view = group.view
+        if not self.selection_step_allowed or view._view_selection is None:
             return
-        position = global_pos or group.tabs.mapToGlobal(QPoint(8, 28))
-        self._menu = self.create_context_menu(group.group_id, key, position)
-        self._menu.closedSignal.connect(lambda: setattr(self, '_menu', None))
-        self._menu.exec(position)
-        self._menu._workspace_keyboard.focus_menu(self._menu)
+        gid, key = group.group_id, group.current_key()
+        bundle = group.rendered_bundle
+        revision = self._sources.get(key, {}).get('revision')
+        selection = QRectF(view._view_selection)
+        submenu = RoundMenu('将框选加入处理草稿', menu)
+        allowed = self.selection_step_allowed(gid, key)
+        for method, label in (('trace_cut', '测道裁剪'), ('trace_qc', '坏道标记'),
+                              ('trace_cut_time', '道与时间裁剪')):
+            requires_time = method == 'trace_cut_time'
+            available = not requires_time or view.time_window_available()
+
+            def submit(method=method, requires_time=requires_time):
+                if (self._groups.get(gid) is group and group.current_key() == key
+                        and group.rendered_bundle is bundle and view._view_selection == selection
+                        and self._sources.get(key, {}).get('revision') == revision
+                        and self.selection_step_allowed(gid, key)
+                        and (not requires_time or view.time_window_available())):
+                    self.selection_step_requested.emit(gid, key, method)
+
+            object_action(submenu, method, label, submit, enabled=allowed and available,
+                          reason='请选择当前输入并清空已有步骤' if not allowed else '需真实 ns 时间轴')
+        menu.addMenu(submenu)
+
+    def show_context_menu(self, group_id=None, key=None, global_pos=None):
+        group = self._group(group_id)
+        if group is not None:
+            position = global_pos or group.tabs.mapToGlobal(QPoint(8, 28))
+            self._present_workspace_menu(self.create_context_menu(group.group_id, key), position)
+
+    def show_group_menu(self, group, position):
+        self._present_workspace_menu(self._populate_group_menu(make_menu(self), group), position)
+
+    def _present_workspace_menu(self, menu, position):
+        self._close_menu()
+        self._menu = menu
+        menu.closedSignal.connect(lambda: setattr(self, '_menu', None) if self._menu is menu else None)
+        show_menu(menu, position)
 
     def _close_menu(self):
         if self._menu is not None:

@@ -164,24 +164,25 @@ def test_menu_reopen_and_programmatic_preference_updates_keep_check_state(qapp):
     view.close()
 
 
-def test_existing_workspace_more_menu_exposes_the_same_display_only_action(qapp):
+def test_workspace_display_menu_is_separate_from_tab_and_group_menus(qapp, monkeypatch):
+    from ui.widgets import bscan_view_interaction
+
     workspace = BScanWorkspace()
-    original = bundle([0,1,0,1,0,0])
-    workspace.set_sources([{'key':'A','title':'A','bundle':original}])
+    workspace.set_sources([{'key': 'A', 'title': 'A', 'bundle': bundle([0, 1, 0, 1, 0, 0])}])
     workspace.open_source('A')
     view = workspace.primary_view()
-    settings = []
+    settings, menus = [], []
     view.sig_display_settings_requested.connect(lambda: settings.append(True))
-    menu = workspace.create_context_menu(key='A')
-    action = next(a for a in menu.actions() if a.text()=='显示设置…')
-    assert not any(a.text() == '显示异常道标记' for a in menu.actions())
-    inputs = []
-    workspace.source_input_requested.connect(inputs.append)
+    monkeypatch.setattr(bscan_view_interaction, 'show_menu', lambda menu, _pos: menus.append(menu))
+    group = workspace.group_widget()
+    group.display_settings.click()
+    display = menus[0]
+    tab = workspace.create_context_menu(key='A')
+    assert all(action.text() != '全局 B-scan 设置…' for action in tab.actions())
+    action = next(action for action in display.actions() if action.text() == '全局 B-scan 设置…')
     action.trigger()
-    assert settings == [True] and view.qc_marks_visible() and not inputs
-    assert workspace.primary_view() is view
-    assert all(m.isVisible() for m in view._qc_marks)
-    menu.close()
+    assert settings == [True] and view.qc_marks_visible() and workspace.active_key() == 'A'
+    tab.deleteLater()
     workspace.close()
 
 

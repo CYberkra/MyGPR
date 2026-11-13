@@ -21,12 +21,13 @@ from ui.file_tree import artifact_parameters, artifact_direct_parent, artifact_s
 from ui.file_tree import build_lineage_model as build_lineage_model  # explicit re-export
 from ui.motion import animate_progress, animations_enabled
 from ui.page_scaffold import make_form_row, refill_combo
-from ui.widgets import ParamForm, PipelineList, clear_invalid
+from ui.widgets import PipelineList, clear_invalid
 from ui.widgets.bscan_workspace import BScanWorkspace
 from ui.widgets.collapsible_card import make_collapsible_card
 from ui.widgets.object_context_menu import ObjectMenuBinding
 from ui.widgets.elided_caption import ElidedCaptionLabel
 from ui.pages.processing_steps import ProcessingSteps
+from ui.pages.processing_sidebar import ProcessingSidebar
 from ui.pages.processing_menus import ProcessingMenus
 from ui.pages.processing_chain_view import ProcessingChainView
 from ui.pages.processing_comparison import LineComparison
@@ -35,7 +36,8 @@ from ui.pages.processing_gain_preview import ProcessingGainPreview
 from ui.widgets.line_drag_combo import LineDragComboBox
 
 
-class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps, ProcessingMenus, ProcessingSelection, QWidget):
+class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps,
+                     ProcessingSidebar, ProcessingMenus, ProcessingSelection, QWidget):
     gain_preview_requested = pyqtSignal(str, str, str, str, list)
     gain_preview_cancelled = pyqtSignal(str)
     run_requested = pyqtSignal(dict)
@@ -73,13 +75,9 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._source_selected_this_line = False
         self._preview_requested = set()
         self._gain_preview_requests = {}
-        self._selected_step, self._selected_method_id = -1, ''
-        self._method_picker, self._step_editor = None, None
-        self._picker_purpose, self._picker_index = 'append', -1
-        self._autotune_result, self._autotune_context = None, None
-        self._autotune_generation = 0
+        self._selected_step = -1
+        self._autotune_result = None
         self._autotune_pending_request = None
-        self._autotune_result_generation = None
         self._sm, self._job_id, self._pending_layout = None, '', None
         self._tools_width_animation = None
         self._tools_expanded_width = 300
@@ -109,19 +107,20 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._line_combo.setMinimumWidth(100)
         self._line_combo.setMaximumWidth(160)
         header.addWidget(self._line_combo)
+        header.addStretch(1)
         self._input_label = ElidedCaptionLabel(self)
-        self._input_label.setText('输入：未选择数据')
-        header.addWidget(self._input_label, 1)
+        self._input_label.setText('输入 · 未选择数据')
+        self._input_label.setMinimumWidth(self._input_label.fontMetrics().horizontalAdvance('输入 · 原始输入') + 8)
+        self._input_label.setMaximumWidth(320)
+        header.addWidget(self._input_label)
         self._source_path_btn = TransparentToolButton(FIF.HISTORY, self)
         self._source_path_btn.setCheckable(True)
-        self._source_path_btn.setChecked(True)
         self._source_path_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
-        self._source_path_btn.setToolTip('已完成来源：展开 / 收起')
-        self._source_path_btn.setAccessibleName('已完成来源')
+        self._source_path_btn.setToolTip('查看处理记录')
+        self._source_path_btn.setAccessibleName('查看处理记录')
         self._source_path_btn.toggled.connect(self._sync_chain_view)
         header.addWidget(self._source_path_btn)
-        self._run_btn = PrimaryPushButton('从此结果运行', self, FIF.PLAY)
-        self._run_btn.setToolTip('使用当前激活结果执行新增步骤（Ctrl+R）')
+        self._run_btn = PrimaryPushButton('运行处理', self, FIF.PLAY)
         self._cancel_btn = PushButton('取消任务', self, FIF.CANCEL)
         self._batch_btn = PushButton('批量应用…', self, FIF.PLAY)
         self._batch_btn.setToolTip('将当前处理链应用到多条测线的原始输入')
@@ -140,7 +139,13 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         chain_layout = QVBoxLayout(chain_page)
         chain_layout.setContentsMargins(8, 8, 8, 8)
         chain_layout.setSpacing(8)
-        self._lineage_tree = QTreeWidget(chain_page)
+        self._build_step_tools(chain_page, chain_layout)
+        self._processing_options = QWidget(chain_page)
+        options = QVBoxLayout(self._processing_options)
+        options.setContentsMargins(0, 0, 0, 0)
+        options.setSpacing(8)
+        chain_layout.addWidget(self._processing_options)
+        self._lineage_tree = QTreeWidget(self._processing_options)
         self._lineage_tree.setHeaderHidden(True)
         self._lineage_tree.setIndentation(12)
         self._lineage_tree.setMinimumHeight(100)
@@ -152,23 +157,16 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._lineage_more_btn.setToolTip('来源操作')
         self._lineage_more_btn.setAccessibleName('来源操作')
         sources_header.addWidget(self._lineage_more_btn)
-        chain_layout.addLayout(sources_header)
-        chain_layout.addWidget(self._lineage_tree)
+        options.addLayout(sources_header)
+        options.addWidget(self._lineage_tree)
         self._draft_menu_btn = TransparentToolButton(FIF.MORE, chain_page)
-        self._draft_menu_btn.setToolTip('草稿操作')
-        self._draft_menu_btn.setAccessibleName('草稿操作')
+        self._draft_menu_btn.setToolTip('处理步骤操作')
+        self._draft_menu_btn.setAccessibleName('处理步骤操作')
         self._pipeline_list = PipelineList(self)
         self._pipeline_list.hide()  # Internal step model; the editable chain is its only visible list.
-        self._add_method_btn = PushButton('添加处理步骤', chain_page, FIF.ADD)
-        self._add_method_btn.hide()  # Compatibility command; the visible append action is in the chain.
-        self._param_empty_hint = CaptionLabel('未选择处理步骤', chain_page)
-        self._param_empty_hint.setWordWrap(True)
-        chain_layout.addWidget(self._param_empty_hint)
-        self._param_form = ParamForm(chain_page)
-        chain_layout.addWidget(self._param_form)
         self._result_name_edit = LineEdit(chain_page)
         self._result_name_edit.setPlaceholderText('可选，留空自动命名')
-        chain_layout.addLayout(make_form_row('结果名称', self._result_name_edit, parent=chain_page))
+        options.addLayout(make_form_row('结果名称', self._result_name_edit, parent=self._processing_options))
         self._execution_card, execution = make_collapsible_card('执行与资源', collapsed=True)
         self._save_intermediates_check = CheckBox('保存每步中间成果', self._execution_card)
         self._save_intermediates_check.setChecked(True)
@@ -179,24 +177,28 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._estimate_label = CaptionLabel('', self._execution_card)
         self._estimate_label.setWordWrap(True)
         execution.addWidget(self._estimate_label)
-        chain_layout.addWidget(self._execution_card)
+        options.addWidget(self._execution_card)
         self._autotune_card, tune = make_collapsible_card('自动调参', collapsed=True)
         self._autotune_method_label = CaptionLabel('', self._autotune_card)
+        self._autotune_method_label.setWordWrap(True)
+        self._autotune_method_label.setTextFormat(Qt.TextFormat.PlainText)
         tune.addWidget(self._autotune_method_label)
         self._autotune_btn = PushButton('开始调参', self._autotune_card)
         self._autotune_result_label = CaptionLabel('', self._autotune_card)
         self._autotune_result_label.setWordWrap(True)
-        self._adopt_params_btn = PushButton('采用最优参数', self._autotune_card)
+        self._autotune_result_label.setTextFormat(Qt.TextFormat.PlainText)
+        self._adopt_params_btn = PushButton('应用建议参数', self._autotune_card)
         self._adopt_params_btn.setEnabled(False)
         tune.addWidget(self._autotune_btn)
         tune.addWidget(self._autotune_result_label)
         tune.addWidget(self._adopt_params_btn)
-        chain_layout.addWidget(self._autotune_card)
+        options.addWidget(self._autotune_card)
         chain_layout.addStretch(1)
         scroll = QScrollArea(self._tools_panel)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(chain_page)
+        self._chain_scroll = scroll
         self._tools_panel.addTab(scroll, '处理')
         history_page = QWidget()
         history_layout = QVBoxLayout(history_page)
@@ -217,9 +219,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         main = QVBoxLayout(center)
         main.setContentsMargins(0, 0, 0, 0)
         main.setSpacing(4)
-        self._path_label = CaptionLabel('', center)
-        self._path_label.setWordWrap(True)
-        self._path_label.hide()
         self._build_chain_view(main)
         self._draft_revision_hint = CaptionLabel('', center)
         self._draft_revision_hint.setWordWrap(True)
@@ -257,6 +256,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
             f' border-bottom: 2px solid {t["primary"]}; }}')
         self._input_label.setStyleSheet(f'color: {t["text_secondary"]};')
         self._param_empty_hint.setStyleSheet(f'color: {t["text_muted"]};')
+        self._method_browser.apply_theme(dark)
         self._draft_revision_hint.setStyleSheet(f'color: {t["warning"]};')
         self._chain_panel.setStyleSheet(
             f'QWidget#processingChainPanel {{ background: {t["bg_subtle"]};'
@@ -269,10 +269,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._pipeline_list.sig_edit_requested.connect(self._open_step_editor)
         self._pipeline_list.sig_duplicate_requested.connect(self._duplicate_step)
         self._pipeline_list.sig_changed.connect(self._draft_changed)
-        self._param_form.sig_changed.connect(self._auto_write_params_to_selected)
-        self._param_form.gain_preview_requested.connect(self._request_gain_preview)
         self._result_name_edit.textChanged.connect(self._draft_changed)
-        self._add_method_btn.clicked.connect(self._open_method_picker)
         self._run_btn.clicked.connect(self._on_run_clicked)
         self._batch_btn.clicked.connect(self._on_batch_clicked)
         self._estimate_btn.clicked.connect(self._on_estimate_clicked)
@@ -284,7 +281,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._workspace.source_activated_by_user.connect(self._activate_comparison_source)
         self._workspace.preview_requested.connect(self._request_preview)
         self._workspace.preview_retry_requested.connect(self.retry_preview)
-        self._workspace.source_context_requested.connect(self._show_source_menu)
+        self._workspace.source_menu_actions = self._add_tab_source_actions
         self._workspace.view_created.connect(self.bscan_view_created)
         self._tools_btn.toggled.connect(self._toggle_tools)
         self._resources_btn.toggled.connect(self._toggle_resources)
@@ -302,6 +299,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._adopt_params_btn.clicked.connect(self._on_adopt_params)
         self._run_shortcut = QShortcut(QKeySequence('Ctrl+R'), self)
         self._run_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._run_shortcut.setAutoRepeat(False)
         self._run_shortcut.activated.connect(self._on_run_clicked)
 
     def _draft_key(self, source=None):
@@ -313,7 +311,9 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
     def _stash_draft(self):
         if self._suspend or not self._selected_source_key:
             return
-        self._drafts[self._draft_key()] = deepcopy(self.current_pipeline())
+        self._drafts[self._draft_key()] = deepcopy({
+            **self.current_pipeline(), 'steps': self._pipeline_list.draft_steps(),
+        })
 
     def _draft_changed(self, *_):
         if self._suspend:
@@ -337,6 +337,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         if self._comparison.active:
             if self._comparison.active != previous_comparison:
                 self._activation_epoch += 1
+                self._close_gain_previews()
             self._refresh_ui()
             return
         revision = str(self._sources.get(key, {}).get('revision') or '')
@@ -348,14 +349,13 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
                 self._source_selected_this_line = True
                 self._pending_layout = None  # an explicit selection supersedes session restoration
             self._activation_epoch += 1
-            self._close_chain_popups()
+            self._reset_step_tools()
             draft = self._drafts.get(self._draft_key(), {})
             self._suspend = True
             self._pipeline_list.set_steps(deepcopy(draft.get('steps') or []))
             self._result_name_edit.setText(str(draft.get('result_name') or ''))
             self._suspend = False
-            self._selected_step = -1
-            self._param_form.clear()
+            self._on_step_selected(-1)
             if self._pipeline_list.count():
                 self._pipeline_list.select_step(0)
         self._refresh_ui()
@@ -368,51 +368,33 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
 
     def _refresh_ui(self):
         source = self._sources.get(self._selected_source_key)
-        self._input_label.setText('输入：' + (source['title'] if source else '未选择数据'))
+        self._input_label.setText('输入 · ' + (source['title'] if source else '未选择数据'))
         steps = self._pipeline_list.steps()
         error = str(source.get('error') or '') if source else ''
-        valid = bool(source and not error and not self._project_read_only
-                     and any(s.get('enabled', True) for s in steps))
+        valid = self._can_edit_chain() and any(s.get('enabled', True) for s in steps)
         self._run_btn.setEnabled(valid and not self._running)
         self._batch_btn.setEnabled(valid and not self._running and len(self._lines) > 0)
         self._estimate_btn.setEnabled(valid and not self._running)
         self._save_intermediates_check.setEnabled(not self._running and not self._project_read_only)
-        self._run_btn.setText('任务运行中…' if self._running else '从此结果运行')
+        self._run_btn.setText('运行中…' if self._running else '运行处理')
         self._run_btn.setToolTip('项目只读，无法提交处理任务' if self._project_read_only else
             ('输入读取失败，请重试预览：' + error) if error else
-            '请先选择有效数据并添加启用步骤' if not valid else '使用所选结果执行新增步骤（Ctrl+R）')
+            '请选择处理输入并添加步骤' if not valid else '运行处理（Ctrl+R）')
         stale = any(k[:3] == self._draft_key()[:3] and k != self._draft_key()
                     and value.get('steps') for k, value in self._drafts.items())
-        self._draft_revision_hint.setText('此数据已更换修订；旧修订草稿已失效并隔离保存。当前修订从空草稿开始。' if stale else '')
+        self._draft_revision_hint.setText('数据已更新，请重新添加处理步骤' if stale else '')
         self._draft_revision_hint.setVisible(stale)
         self._cancel_btn.setVisible(self._running)
         self._cancel_btn.setEnabled(self._running)
-        locked = self._draft_locked()
-        for widget in (self._pipeline_list, self._param_form, self._add_method_btn, self._result_name_edit):
-            widget.setEnabled(not locked)
-        self._sync_param_empty_hint()
-        self._update_autotune_enabled()
-        self._adopt_params_btn.setEnabled(self._can_adopt_autotune())
-        path, seen, aid = [], set(), self._input_artifact_id()
-        while aid and aid in self._artifacts_by_id and aid not in seen:
-            seen.add(aid)
-            art = self._artifacts_by_id[aid]
-            path.insert(0, str(getattr(art, 'name', '') or aid))
-            parent = artifact_direct_parent(art)
-            if parent is None:
-                path.insert(0, '来源待核对')
-                break
-            aid = parent
-        if self._selected_source_key and (not path or path[0] != '来源待核对'):
-            path.insert(0, '原始输入')
-        self._path_label.setText(' › '.join(path))
+        for widget in (self._pipeline_list, self._result_name_edit):
+            widget.setEnabled(self._can_edit_chain())
+        self._sync_step_tools()
+        self._sync_autotune()
         self._sync_chain_view()
         if self._comparison.active:
-            source = self._comparison.sources[self._comparison.active]
-            self._input_label.setText(f'仅对比：{source["line_id"]}；处理输入仍为 {self._line_id} · '
-                                     + str(self._sources.get(self._selected_source_key, {}).get('title', '未选择')))
             self._run_btn.setEnabled(False)
-            self._run_btn.setToolTip('此视图仅用于对比；请从标签菜单选择“设为处理输入”或回到处理输入标签')
+            self._run_btn.setToolTip('在对比标签菜单中选择“设为处理输入”，或切回输入标签')
+        self._run_shortcut.setEnabled(self._run_btn.isEnabled())
 
     def _sync_sources(self):
         sources = [dict(source, title=f'{self._comparison.label(self._line_id)} · 原始输入')
@@ -476,9 +458,11 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
     def set_original_revision(self, project_id, line_id, revision):
         if (str(project_id), str(line_id)) != (self._project_id, self._line_id):
             return
-        if self._raw_revision != str(revision or ''):
+        revision = str(revision or '')
+        if self._raw_revision != revision:
             self._close_gain_previews()
-        self._raw_revision = str(revision or '')
+            self._raw_revision = revision
+            self._refresh_ui()
 
     def set_preview_failure(self, project_id, line_id, artifact_id, message):
         """Only the matching saved source owns an asynchronous read failure."""
@@ -595,7 +579,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
             self._switch_line(line_id)
 
     def _switch_line(self, line_id):
-        self._close_chain_popups()
+        self._reset_step_tools()
         self._stash_draft()
         self._save_session()
         self._suspend = True
@@ -609,7 +593,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._selected_revision, self._raw_revision = '', ''
         self._pipeline_list.set_steps([])
         self._result_name_edit.clear()
-        self._param_form.clear()
         self._preview_requested.clear()
         self._raw_opened = False
         self._source_selected_this_line = False
@@ -639,8 +622,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
             self._run_snapshot = {'key': self._draft_key(), 'input_artifact_id': self._input_artifact_id(),
                 'pipeline': deepcopy(self.current_pipeline()), 'epoch': self._activation_epoch,
                 'artifacts': set(self._artifacts_by_id), 'activate': True}
-            if self._step_editor is not None:
-                self._step_editor.close()
+            self._close_gain_previews()
             self._progress_bar.setValue(0)
             self._progress_label.setText('输入：' + self._input_label.text().removeprefix('输入：'))
         elif not running and self._running and self._run_snapshot:
@@ -675,15 +657,12 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         super().hideEvent(event)
 
     def _on_run_clicked(self):
-        if self._running:
-            self.cancel_requested.emit()
-            return
-        if self._run_btn.isEnabled():
+        if not self._running and self._run_btn.isEnabled() and not self._focus_pending_edit():
             clear_invalid(self._result_name_edit)
             self.run_requested.emit(deepcopy(self.current_pipeline()))
 
     def _on_batch_clicked(self):
-        if self._running or self._project_read_only:
+        if self._running or self._project_read_only or self._focus_pending_edit():
             return
         steps = [step for step in self._pipeline_list.steps() if step.get('enabled', True)]
         if not steps:
@@ -695,6 +674,8 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
             self.batch_run_requested.emit(dialog.payload())
 
     def _on_estimate_clicked(self):
+        if self._focus_pending_edit():
+            return
         if not any(step.get('enabled', True) for step in self._pipeline_list.steps()):
             self._estimate_label.setText('请先添加至少一个启用步骤')
             return
@@ -783,6 +764,22 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         saved = self._saved_run(str(group))
         return self._replace_draft(saved[0], saved[1]) if saved else False
 
+    def load_job_configuration(self, context):
+        """Return None until the submitted input's source list is available."""
+        if self._project_read_only or self._draft_locked():
+            return False
+        artifact_id = context['input_artifact_id']
+        source = f'artifact:{artifact_id}' if artifact_id else 'original'
+        if source not in self._sources:
+            return None
+        if not self._replace_draft(source, context['steps']):
+            return False
+        self._result_name_edit.setText(context['result_name'])
+        self._save_intermediates_check.setChecked(context['save_intermediates'])
+        self._stash_draft()
+        self._save_session()
+        return True
+
     def _replace_draft(self, source, steps):
         if source not in self._sources:
             return False
@@ -803,6 +800,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
             self._draft_backups.setdefault(key, []).append(deepcopy(old))
         self._drafts[key] = {'steps': deepcopy(steps), 'result_name': ''}
         self._workspace.open_source(source)
+        self._reset_step_tools()
         self._suspend = True
         self._pipeline_list.set_steps(deepcopy(steps))
         self._result_name_edit.clear()

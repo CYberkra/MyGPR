@@ -27,10 +27,11 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QLabe
                              QListWidget, QListWidgetItem, QWidget)
 from PyQt6.QtWidgets import QPushButton
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
-                            PrimaryPushButton, RoundMenu, ToolButton)
+                            PrimaryPushButton, PushButton, RoundMenu, ToolButton)
 
 from ui import constants, motion
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action, make_menu, show_menu
+from ui.widgets.object_context_menu import ObjectMenuBinding, object_action
 
 
 def _muted_text() -> str:
@@ -205,7 +206,10 @@ class _ChipList(QListWidget):
             QApplication.sendEvent(self.viewport(), forwarded)
             return True
         if event.type() == QEvent.Type.ContextMenu:
-            self._host._on_context_menu(watched.mapTo(self.viewport(), event.pos()))
+            if event.reason() == event.Reason.Keyboard:
+                self._host._step_menu.show_keyboard()
+            else:
+                self._host._step_menu.show(watched.mapTo(self.viewport(), event.pos()))
             return True
         return super().eventFilter(watched, event)
 
@@ -270,15 +274,6 @@ class _ChipList(QListWidget):
         self._drop_marker.hide()
         super().dragLeaveEvent(event)
 
-    def keyPressEvent(self, event):
-        if (event.key() == Qt.Key.Key_Menu or
-                (event.key() == Qt.Key.Key_F10 and
-                 event.modifiers() & Qt.KeyboardModifier.ShiftModifier)):
-            self._host._request_editor(self.currentRow())
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
     def dropEvent(self, event) -> None:
         self._host._list_drop_event(event, source=self._press_source,
                                     generation=self._press_generation)
@@ -293,8 +288,9 @@ class ChainStrip(QWidget):
     sig_step_removed = pyqtSignal(int)
     sig_step_moved = pyqtSignal(int, int)   # source → 插入位
     sig_add_requested = pyqtSignal()
-    # chip 右键唯一入口（P0-3 合一弹窗）：步骤索引 → 宿主页弹 StepEditorPopup
     sig_step_editor_requested = pyqtSignal(int)
+    sig_step_duplicate_requested = pyqtSignal(int)
+    sig_step_replace_requested = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -319,14 +315,15 @@ class ChainStrip(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         # 手势替代路径：右键菜单 + Delete 键（guidelines 要求拖拽必须有
         # 点击/键盘替代——PipelineList 的等价能力随右栏隐藏后在此补齐）
-        self._list.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu)
-        self._list.customContextMenuRequested.connect(self._on_context_menu)
+        self._step_menu = ObjectMenuBinding(self, self._list, self._context_menu)
         self._delete_shortcut = QShortcut(
             QKeySequence(QKeySequence.StandardKey.Delete), self._list,
             context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self._delete_shortcut.activated.connect(
             lambda: self._on_chip_deleted(self._list.currentRow()))
+        self._edit_shortcut = QShortcut(QKeySequence('Return'), self._list,
+            context=Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._edit_shortcut.activated.connect(lambda: self._request_editor(self._list.currentRow()))
         # 深浅主题下与卡片底色融合；选中高亮交给滑动胶囊（Qt 默认蓝块弃用）
         self._apply_list_qss()
         self._list.currentRowChanged.connect(self._on_current_row)
@@ -335,7 +332,7 @@ class ChainStrip(QWidget):
 
         self._add_btn = ToolButton(FIF.ADD, self)
         self._add_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
-        self._add_btn.setToolTip('添加处理步骤（弹出方法选择器，双击加入链尾）')
+        self._add_btn.setToolTip('打开算法库')
         self._add_btn.setAccessibleName('添加处理步骤')
         self._add_btn.clicked.connect(self.sig_add_requested)
         self._dirty_label = CaptionLabel('已修改 · 点运行更新', self)
@@ -357,14 +354,11 @@ class ChainStrip(QWidget):
         self._overlay_timer = QTimer(self)
         self._overlay_timer.setSingleShot(True)
         self._overlay_timer.timeout.connect(self._update_overlays)
-        # 空链引导（2026-10-09 深查 P2）：空链时列表区一片空白，新用户
-        # 不知道从哪开始——浮层文字提示（不挡鼠标，＋ 钮照常可点）
-        self._empty_hint = CaptionLabel('从左侧方法库添加算法',
-                                        self._list.viewport())
-        self._empty_hint.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._empty_hint.setStyleSheet(f'color:{color("text_muted")}')
-        self._empty_hint.setVisible(False)
+        self._empty_add = PushButton('添加步骤', self, FIF.ADD)
+        self._empty_add.setToolTip('打开算法库')
+        self._empty_add.clicked.connect(self.sig_add_requested)
+        self._add_btn.hide()
+        self._list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # 溢出胶囊（2026-10-09 深查 P1）：浮在列表右缘，放不下的 chip 折叠
         # 成 +N，点击弹全部步骤菜单。做成视口浮层而非行内控件——不挤占
         # 本就紧张的 chip 空间（行内加控件会反过来缩小视口，测量振荡）
@@ -378,6 +372,7 @@ class ChainStrip(QWidget):
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(constants.CARD_SPACING)
+        row.addWidget(self._empty_add)
         row.addWidget(self._list, 1)
         row.addWidget(self._dirty_label)
         row.addWidget(self._add_btn)
@@ -389,15 +384,16 @@ class ChainStrip(QWidget):
         return self._run_btn
 
     def add_button(self):
-        """加号按钮：算法选择器的锚定控件。"""
-        return self._add_btn
+        """打开算法库的加号按钮。"""
+        return self._add_btn if self._list.count() else self._empty_add
+
+    def set_add_enabled(self, enabled: bool) -> None:
+        self._add_btn.setEnabled(enabled)
+        self._empty_add.setEnabled(enabled)
 
     def set_run_button_visible(self, visible: bool) -> None:
         """Hosts with a shared header action can reclaim the strip's button space."""
         self._run_btn.setVisible(visible)
-
-    def set_empty_hint(self, text: str) -> None:
-        self._empty_hint.setText(str(text))
 
     def step_anchor(self, index: int):
         """Return the current rendered chip for the host's parameter popup."""
@@ -435,7 +431,6 @@ class ChainStrip(QWidget):
                 self._steps[idx]['enabled']
                 if 0 <= idx < len(self._steps) else True)
         self._dirty_label.setStyleSheet(f'color:{color("warning")}')
-        self._empty_hint.setStyleSheet(f'color:{color("text_muted")}')
         self._style_overflow_btn()
         self._pill.setStyleSheet(
             f'background:{rgba("primary", 0.08)};'
@@ -559,6 +554,7 @@ class ChainStrip(QWidget):
 
     def _invalidate_interactions(self) -> None:
         self._display_generation += 1
+        self._step_menu.close()
         if self._list._drag_active:
             QDrag.cancel()
         self._list._press_source = -1
@@ -627,16 +623,32 @@ class ChainStrip(QWidget):
         if self.isEnabled() and 0 <= index < len(self._steps):
             self.sig_step_removed.emit(index)
 
-    # -------------------------------------- 右键（替代路径 → 合一弹窗）
-    def _on_context_menu(self, pos) -> None:
-        """右键 chip → 置当前行 + 发 sig_step_editor_requested（P0-3 合一
-        弹窗唯一入口；旧四动作菜单删除，动作全部收敛进步骤编辑弹窗）。"""
-        # 原 rowAt 系 QListView 不存在的方法（QTableView 才有）——右键即
-        # AttributeError 的潜伏 bug，随本改造一并修正为 itemAt
+    def _context_menu(self, pos):
+        menu = make_menu(self)
         item = self._list.itemAt(pos)
-        row = self._list.row(item) if item is not None else -1
-        index = row                          # row 即步骤索引
-        self._request_editor(index)
+        if self.isEnabled() and item is not None:
+            self._add_step_commands(menu, self._list.row(item))
+        return menu
+
+    def _add_step_commands(self, menu, index):
+        generation = self._display_generation
+
+        def current(callback, *args):
+            if self.isEnabled() and generation == self._display_generation:
+                callback(index, *args)
+
+        enabled = self._steps[index]['enabled']
+        object_action(menu, 'edit-step', '编辑参数…', lambda: current(self.sig_step_editor_requested.emit))
+        object_action(menu, 'toggle-step', '停用' if enabled else '启用',
+                      lambda: current(self.sig_step_toggled.emit, not enabled))
+        object_action(menu, 'copy-step', '复制步骤', lambda: current(self.sig_step_duplicate_requested.emit))
+        object_action(menu, 'move-up', '上移', lambda: current(self.sig_step_moved.emit, index - 1),
+                      enabled=index > 0)
+        object_action(menu, 'move-down', '下移', lambda: current(self.sig_step_moved.emit, index + 2),
+                      enabled=index + 1 < len(self._steps))
+        object_action(menu, 'replace-step', '替换方法…', lambda: current(self.sig_step_replace_requested.emit))
+        menu.addSeparator()
+        object_action(menu, 'remove-step', '从草稿移除', lambda: current(self.sig_step_removed.emit))
 
     def _request_editor(self, index: int) -> None:
         if not self.isEnabled() or index < 0 or index >= len(self._steps):
@@ -689,7 +701,9 @@ class ChainStrip(QWidget):
         self._move_pill(lst.currentRow())
         vp = lst.viewport()
         n = lst.count()
-        self._empty_hint.setVisible(n == 0)
+        self._empty_add.setVisible(n == 0)
+        self._add_btn.setVisible(n > 0)
+        self._list.setFocusPolicy(Qt.FocusPolicy.StrongFocus if n else Qt.FocusPolicy.NoFocus)
         hidden = 0
         if n and vp.width() > 0:
             for i in range(n):
@@ -706,9 +720,6 @@ class ChainStrip(QWidget):
                 max(0, vp.width() - self._overflow_btn.width() - 2),
                 max(0, (vp.height() - self._overflow_btn.height()) // 2))
             self._overflow_btn.raise_()
-        self._empty_hint.adjustSize()
-        self._empty_hint.move(
-            12, max(0, (vp.height() - self._empty_hint.height()) // 2))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -729,15 +740,11 @@ class ChainStrip(QWidget):
         menu = self._build_overflow_menu()
         # Fluent exec() returns immediately. make_menu owns disposal after the
         # close signal and synchronous action dispatch have both completed.
-        menu.exec(self._overflow_btn.mapToGlobal(
+        show_menu(menu, self._overflow_btn.mapToGlobal(
             self._overflow_btn.rect().bottomLeft()))
 
     def _build_overflow_menu(self) -> RoundMenu:
-        """+N 菜单：每步骤一个子菜单 = 「选中 / 编辑」两项（P0-3 定案 Q3：
-        结构动作全进合一弹窗，不维护两套入口——被裁掉的步骤与可见 chip
-        手势等价可达，guidelines：内容不得因布局不可达）。
-        构建与弹出拆开，便于测试菜单结构。
-        """
+        """Expose the same commands for steps hidden by the available width."""
         menu = make_menu(self)
         self._overflow_menus.append(menu)
         # Drop tracking only after native destruction, never at exec() return.
@@ -757,24 +764,17 @@ class ChainStrip(QWidget):
             # 实际选中第 0 行的潜伏 bug，本次一并修正）
             add_action(sub, FIF.VIEW, '选中',
                        lambda _checked=False, ix=i, gen=generation:
-                       self._overflow_action(ix, gen, edit=False))
-            add_action(sub, FIF.EDIT, '编辑',
-                       lambda _checked=False, ix=i, gen=generation:
-                       self._overflow_action(ix, gen, edit=True))
+                       self._select_overflow_step(ix, gen))
+            self._add_step_commands(sub, i)
             menu.addMenu(sub)
             subs.append(sub)
         # qfw 未暴露子菜单清单——挂引用供测试访问（menu._step_submenus）
         menu._step_submenus = subs
         return menu
 
-    def _overflow_action(self, index: int, generation: int, *, edit: bool) -> None:
+    def _select_overflow_step(self, index: int, generation: int) -> None:
         if (not self.isEnabled() or generation != self._display_generation
                 or not 0 <= index < len(self._steps)):
             return
-        if edit:
-            # The host owns selection while opening the editor. Keep this a
-            # single edit request, as in the existing overflow API contract.
-            self.sig_step_editor_requested.emit(index)
-        else:
-            self._list.setCurrentRow(index)
-            self._list.scrollToItem(self._list.item(index))
+        self._list.setCurrentRow(index)
+        self._list.scrollToItem(self._list.item(index))

@@ -71,15 +71,13 @@ def friendly_error_message(exc: BaseException | None) -> str:
         if hint:
             text += f" — {hint}"
         return text
-    # HDF5 容器损坏（如写入中断产生的 bad layout message）：给可操作提示
-    # 而非裸 KeyError，指引用户从原始 CSV 重新导入测线
     message = str(exc).strip()
     if _HDF5_CORRUPT_PATTERN.search(message):
-        return ("数据文件损坏，无法读取。请删除该测线后从原始 CSV 重新导入；"
-                "处理结果无法保留（详见日志）")
-    if isinstance(exc, PermissionError) or _FILE_IN_USE_PATTERN.search(message):
-        return ("文件被占用，无法完成写入。请关闭正在预览该测线的窗口或其他"
-                "占用该文件的程序后重试（详见日志）")
+        return "无法读取数据文件。可以从备份恢复，或重新导入原采集文件。"
+    if getattr(exc, 'winerror', None) in (32, 33) or _FILE_IN_USE_PATTERN.search(message):
+        return "文件正在使用。关闭占用该文件的窗口后重试。"
+    if isinstance(exc, PermissionError):
+        return "没有权限访问此位置。请检查权限或选择其他位置。"
     return message or type(exc).__name__
 
 
@@ -89,8 +87,7 @@ _HDF5_CORRUPT_PATTERN = re.compile(
     re.IGNORECASE)
 
 _FILE_IN_USE_PATTERN = re.compile(
-    r"WinError 32|WinError 33|being used by another process|"
-    "denied access|拒绝访问",
+    r"WinError 32|WinError 33|being used by another process|正被另一进程使用",
     re.IGNORECASE)
 
 

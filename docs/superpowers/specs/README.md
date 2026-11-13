@@ -6,7 +6,7 @@
 
 | 范围 | 入口 |
 | --- | --- |
-| 工作台七页导航、B-scan 标签、成果续算与菜单 | [2026-10-16 现行合同](2026-10-16-workbench-redesign.md) |
+| 工作台五页导航、B-scan 标签、成果续算与菜单 | [2026-10-16 现行合同](2026-10-16-workbench-redesign.md) |
 | 项目启动区、搜索和固定最近项目 | [启动页设计](2026-11-04-startup-page-design.md)、[工作台速览](../../../GUI_README.md) |
 | 项目、测线、处理成果和空间成果永久删除 | [删除设计](2026-11-04-deletion-interaction-design.md)、[用户指南](../../user/用户指南.md#6-备份恢复与数据安全) |
 | Windows 安装版验签更新 | [应用内更新设计](2026-11-05-application-updates-design.md)、[发布流程](../../releases/application-updates.md) |
@@ -15,10 +15,12 @@
 | 后端 API | [API 说明](../../architecture/BACKEND_API_V1.md)、`config/backend_api_v1.json` |
 | 项目数据与持久化 | [Hybrid Store](../../developer/HYBRID_PROJECT_STORE_V1.md)、[数据协议](../../developer/project_data_contract.md) |
 | 输入格式与采集 HDF5 | [格式参考](../../user/reference/数据格式参考.md) |
+| 点标记、事件区间与显式选道 | [实现合同](2026-11-11-marker-event-contract.md)、[使用指南](../../user/how-to/标记与事件区间.md) |
 | 质量检查与证据范围 | [测试策略](../../developer/TESTING_STRATEGY.md) |
 
 ## 保存的设计记录
 
+- [2026-11-12 设置、菜单与弹层整理方案](2026-11-12-command-surfaces-design.md)（设计稿）。
 - 2026-11 实施记录：[应用内更新](../plans/2026-11-05-application-updates.md)、[永久删除](../plans/2026-11-05-permanent-deletion.md)、[启动页](../plans/2026-11-04-startup-page.md)。其中的进度描述是当时快照。
 - [2026-09-03 工程化路线图](2026-09-03-engineering-roadmap.md)：分阶段决策与当时状态；未完成项需按当前代码重新核查。
 - [2026-09-06 反卷积 / Inverse-Q](2026-09-06-deconv-inverseq-design.md)。

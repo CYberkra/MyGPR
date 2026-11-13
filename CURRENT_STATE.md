@@ -30,7 +30,7 @@ mygpr
 ## Architecture status
 
 - `ui/` → `core/` violations have been removed via `ui/desktop_backend_facade.py`.
-- `MyGPRMainWindow` assembles seven pages behind a top tab bar, a project tree,
+- `MyGPRMainWindow` assembles five pages behind a top tab bar, a project tree,
   and a bottom output panel. `page_coordinator.py` delegates signal wiring to
   `coordinator_project.py`, `coordinator_processing.py`, and `coordinator_jobs.py`.
 - Home and Project share one project workspace. Processing uses manually docked

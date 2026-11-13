@@ -57,11 +57,12 @@ class TrajectoryModel:
         "coordinate_system",
     ]
 
-    def __init__(self, points: Iterable[TrajectoryPoint]) -> None:
+    def __init__(self, points: Iterable[TrajectoryPoint], *, trace_indices_explicit: bool = True) -> None:
         pts = list(points)
         if not pts:
             raise ValueError("TrajectoryModel requires at least one point")
         self.points = pts
+        self.trace_indices_explicit = trace_indices_explicit
         self.distance = np.asarray([p.distance_m for p in pts], dtype=np.float64)
         self.x = np.asarray([p.x for p in pts], dtype=np.float64)
         self.y = np.asarray([p.y for p in pts], dtype=np.float64)
@@ -120,7 +121,14 @@ class TrajectoryModel:
             reader = csv.DictReader(fh)
             if not reader.fieldnames:
                 raise ValueError(f"Trajectory file has no header: {src}")
+            explicit_trace_indices = "trace_index" in reader.fieldnames
             for row_index, row in enumerate(reader):
+                if explicit_trace_indices:
+                    try:
+                        trace_index = float(row.get("trace_index") or "")
+                        explicit_trace_indices = np.isfinite(trace_index) and trace_index.is_integer()
+                    except ValueError:
+                        explicit_trace_indices = False
                 def get_float(*keys: str, default: float = 0.0) -> float:
                     for key in keys:
                         value = row.get(key)
@@ -132,7 +140,8 @@ class TrajectoryModel:
                     return default
 
                 def get_int(*keys: str, default: int = 0) -> int:
-                    return int(round(get_float(*keys, default=float(default))))
+                    value = get_float(*keys, default=float(default))
+                    return int(round(value)) if np.isfinite(value) else default
 
                 def sensor_float(*keys: str) -> float:
                     # An explicit empty sensor column is missing, not zero.
@@ -170,7 +179,7 @@ class TrajectoryModel:
                 )
         if not points:
             raise ValueError(f"Trajectory file contains no points: {src}")
-        return cls(points)
+        return cls(points, trace_indices_explicit=explicit_trace_indices)
 
     def to_csv(self, path: str | Path) -> Path:
         out = Path(path)

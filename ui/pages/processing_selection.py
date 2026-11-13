@@ -7,6 +7,7 @@ class ProcessingSelection:
         return bool(group and self._project_id and self._line_id and not self._running
                     and not self._project_read_only and key == self._selected_source_key
                     and group.current_key() == key and key in self._sources
+                    and (key != 'original' or self._sources[key].get('revision', '') == self._raw_revision)
                     and not self._sources[key].get('comparison')
                     and group.rendered_bundle is self._sources[key].get('bundle')
                     and group.view._view_selection is not None

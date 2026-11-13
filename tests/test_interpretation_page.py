@@ -75,12 +75,12 @@ class TestSessionGating:
         page._confirm_btn.click()
         assert statuses == ['confirmed']
 
-    def test_editing_confirmed_annotation_marks_review_required(self, qapp):
+    def test_editing_confirmed_annotation_shows_unsaved_changes(self, qapp):
         page = InterpretationPage()
         page.set_session_active(True)
         page.set_saved_status('confirmed')
         page._on_point_picked(3, 4)
-        assert '需重新确认' in page._session_status_label.text()
+        assert '未保存' in page._session_status_label.text()
 
     def test_editing_saved_draft_shows_unsaved_changes(self, qapp):
         page = InterpretationPage()

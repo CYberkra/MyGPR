@@ -19,7 +19,7 @@ def test_report_config_builds_complete_backend_profile(qapp):
     dialog._compiler.setText('甲')
     dialog._reviewer.setText('乙')
     dialog._approver.setText('丙')
-    dialog._lines_list.item(1).setCheckState(Qt.CheckState.Unchecked)
+    dialog._line_items['L02'].setCheckState(0, Qt.CheckState.Unchecked)
     values = dialog.payload()
     assert values['package_name'] == 'final'
     profile = values['report_profile']
@@ -30,6 +30,13 @@ def test_report_config_builds_complete_backend_profile(qapp):
     assert profile['reviewer'] == '乙'
     assert profile['approver'] == '丙'
     assert profile['include_integrity_manifest'] is True
+    dialog._artifact_items['A1'].setCheckState(0, Qt.CheckState.Unchecked)
+    assert dialog.payload()['report_profile']['selected_artifact_ids'] == []
+    assert '0 项处理成果' in dialog._scope_summary.text()
+    dialog._line_items['L01'].setCheckState(0, Qt.CheckState.Unchecked)
+    dialog.accept()
+    assert not dialog._confirm.isEnabled()
+    assert not dialog.result()
     dialog.close()
     dialog.deleteLater()
 
@@ -53,3 +60,36 @@ def test_restore_emits_new_project_destination_without_overwrite(qapp, monkeypat
     assert requests[0]['open_after_restore'] is True
     page.close()
     page.deleteLater()
+
+
+def test_report_config_keeps_line_edits_and_requires_an_in_scope_main_version(qapp):
+    from ui.pages.report_config import ReportConfigDialog
+
+    lines = [NS(line_id=key, name=key, trace_count=60) for key in ('L01', 'L02')]
+    artifacts = [NS(artifact_id=key, line_id='L01', name=key) for key in ('A1', 'A2')]
+    dialog = ReportConfigDialog(lines, artifacts, [])
+    selector = dialog._primary_selectors['L01']
+    assert dialog._artifact_items['A1'].parent() == dialog._line_items['L01']
+    selector.setCurrentIndex(selector.findData(''))
+    selector.setCurrentIndex(selector.findData('A1'))
+    dialog._manual_fields['frequency'].setText('10–400 MHz')
+    dialog._first_trace.setValue(12)
+    dialog._last_trace.setValue(20)
+    dialog._analysis_fields['observation'].setPlainText('观察甲')
+    dialog._content_line.setCurrentIndex(dialog._content_line.findData('L02'))
+    assert not dialog._manual_fields['frequency'].text()
+    dialog._content_line.setCurrentIndex(dialog._content_line.findData('L01'))
+    assert dialog._first_trace.value() == 12
+    assert dialog._analysis_fields['observation'].toPlainText() == '观察甲'
+
+    dialog._artifact_items['A1'].setCheckState(0, Qt.CheckState.Unchecked)
+    dialog.accept()
+    assert not dialog.result()
+    assert '请重新选择' in dialog._scope_error.text()
+    selector.setCurrentIndex(selector.findData(''))
+    profile = dialog.payload()['report_profile']
+    assert profile['primary_artifacts'] == {'L01': ''}
+    assert profile['line_analysis']['L01']['last_trace'] == 20
+    assert profile['acquisition_overrides']['L01']['frequency'] == '10–400 MHz'
+    dialog.close()
+    dialog.deleteLater()

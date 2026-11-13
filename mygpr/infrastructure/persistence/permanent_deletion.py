@@ -41,6 +41,7 @@ class PermanentDeletionMixin:
             elif kind == 'lines':
                 paths = [root / folder / target for target in targets for folder in ('raw', 'processed')]
                 for target in targets:
+                    paths.append(root / 'metadata' / 'markers' / f'{target}.json')
                     if self._store.storage.is_hybrid:
                         paths.extend([self._store.storage.line_container_path(target),
                                       self._store.storage.line_artifacts_dir(target)])

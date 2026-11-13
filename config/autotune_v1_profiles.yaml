@@ -112,7 +112,7 @@ recipes:
   - sliding_background_weak_or_svd_rank1_only
   - continuity_scoring
   - depth_compensation_safe
-  risk: 可视上不一定最锐利；以保守处理和人工复核为边界。
+  risk: 保守增益可能使深部弱反射在图上仍不明显。
 - id: deep_weak_reflector
   name: 深部弱反射增强
   profiles:
@@ -138,7 +138,7 @@ recipes:
   - weak_background_suppression
   - attenuation_continuity_scoring
   - risk_label
-  risk: 不能把衰减带直接解释为含水层；必须人工复核。
+  risk: 衰减带可能由含水、导电性变化或散射引起。
 - id: object_focus_experimental
   name: 局部异常聚焦（高级）
   profiles:

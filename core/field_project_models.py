@@ -197,6 +197,7 @@ class FieldProjectManifest:
     device_model: str = "无人机/半航空 GPR + RTK/IMU"
     coordinate_system: str = "CGCS2000 / 3-degree GK"
     vertical_datum: str = "1985 国家高程基准"
+    timezone: str = "UTC"
     coordinate_crs_wkt: str = ""
     vertical_crs_wkt: str = ""
     revision: int = 0

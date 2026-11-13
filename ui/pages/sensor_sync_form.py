@@ -4,7 +4,7 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import CheckBox, DoubleSpinBox, LineEdit, PushButton
 
-from ui.page_scaffold import make_form_row, make_hint
+from ui.page_scaffold import make_form_row
 from ui.widgets.collapsible_card import make_collapsible_card
 
 
@@ -72,18 +72,13 @@ class SensorSyncForm(QWidget):
         self._fields['allow_extrapolation'] = extrapolation
         crs = LineEdit(advanced_card)
         crs.setPlaceholderText('留空沿用项目坐标系，例如 EPSG:4547')
-        crs.setToolTip('填写明确的工程投影坐标系，例如 EPSG:4523；项目的笼统名称无法确定分带时，请在此输入实际 EPSG。')
+        crs.setToolTip('项目坐标系未指定分带时，可填写明确的 EPSG。符合条件的经纬度轨迹也可自动推断分带。')
         advanced.addLayout(make_form_row('项目坐标系', crs, parent=advanced_card))
         self._fields['project_crs'] = crs
         layout.addWidget(advanced_card)
-        crs_hint = make_hint('项目未指定分带时，符合条件的经纬度轨迹会自动推断并提示；也可在高级设置中指定实际 EPSG。', parent=self)
-        crs_hint.setWordWrap(True)
-        layout.addWidget(crs_hint)
-        hint = make_hint('模板仅保存同步与标定参数，不包含各测线的设备文件路径。', parent=self)
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
         templates = QHBoxLayout()
         save = PushButton('保存为项目模板', self)
+        save.setToolTip('保存同步与标定参数')
         apply = PushButton('应用项目模板', self)
         save.clicked.connect(self.save_template_requested)
         apply.clicked.connect(self.apply_template_requested)

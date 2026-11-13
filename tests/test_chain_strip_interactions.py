@@ -59,15 +59,25 @@ def test_summary_and_enabled_state_are_explained_and_same_render_keeps_widgets(s
 def test_context_event_on_label_and_keyboard_edit_are_reachable(strip):
     got = []
     strip.sig_step_editor_requested.connect(got.append)
+    strip.select_step(0)
     label = chip(strip, 1).name
     QApplication.sendEvent(label, QContextMenuEvent(
         QContextMenuEvent.Reason.Mouse, label.rect().center(),
         label.mapToGlobal(label.rect().center())))
+    assert got == [] and strip._list.currentRow() == 0
+    menu = strip._step_menu.menu
+    next(a for a in menu.actions() if a.data() == 'edit-step').trigger()
+    menu.close()
     assert got == [1]
+
     strip._list.setFocus()
-    QTest.keyClick(strip._list, Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier)
-    QTest.keyClick(strip._list, Qt.Key.Key_Menu)
-    assert got == [1, 1, 1]
+    for key, modifier in ((Qt.Key.Key_F10, Qt.KeyboardModifier.ShiftModifier),
+                          (Qt.Key.Key_Menu, Qt.KeyboardModifier.NoModifier)):
+        QTest.keyClick(strip._list, key, modifier)
+        menu = strip._step_menu.menu
+        assert menu is not None
+        QTest.keyClick(menu.view, Qt.Key.Key_Return)
+    assert got == [1, 0, 0]
 
 
 @pytest.mark.parametrize('disabled', [False, True])
