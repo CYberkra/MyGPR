@@ -12,7 +12,7 @@ from qfluentwidgets import (
     setCustomStyleSheet, TreeWidget,
 )
 
-from core.report_line_content import ANALYSIS_FIELDS, MANUAL_ACQUISITION_FIELDS
+from mygpr.interfaces.reporting import ANALYSIS_FIELDS, MANUAL_ACQUISITION_FIELDS
 from ui.page_scaffold import card_title, make_form_row, make_hint
 from ui.widgets.collapsible_card import make_collapsible_card
 

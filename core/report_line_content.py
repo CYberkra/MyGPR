@@ -11,21 +11,7 @@ from mygpr.domain.markers.mapping import TraceMapping
 from mygpr.domain.markers.models import EventInterval, MarkerDocument
 from mygpr.domain.markers.operations import interval_boundary_issue
 from mygpr.domain.markers.ranges import interval_bounds
-
-
-MANUAL_ACQUISITION_FIELDS = {
-    'antenna': '天线型号／配置',
-    'platform': '平台／采集方式',
-    'survey_date': '采集日期',
-    'frequency': '频段或中心频率',
-    'power': '功率（设定或实测）',
-    'source': '补录依据',
-}
-ANALYSIS_FIELDS = {
-    'observation': '观察',
-    'interpretation': '判断与依据',
-    'verification': '验证结果与依据',
-}
+from mygpr.domain.reporting.models import ANALYSIS_FIELDS, MANUAL_ACQUISITION_FIELDS
 
 
 def acquisition_rows(dataset, line, project, manual):

@@ -118,6 +118,8 @@ def test_saved_source_path_opens_real_result_without_replaying_it(page):
 
 def test_saved_source_path_shows_only_algorithm_names_and_keeps_parameter_tooltip(page):
     page.select_artifact('B')
+    assert not page._saved_path.isVisibleTo(page)
+    page._source_path_btn.click()
     buttons = page._saved_path.buttons()
     assert all('w=' not in button.text() for button in buttons)
     assert any('去漂移' in button.accessibleName() for button in buttons)
@@ -129,6 +131,7 @@ def test_saved_source_path_shows_only_algorithm_names_and_keeps_parameter_toolti
 
 def test_saved_source_path_elision_preserves_accessibility_and_tooltip(page, qapp):
     page.select_artifact('B')
+    page._source_path_btn.click()
     button = next(item for item in page._saved_path.buttons() if '去漂移' in item.accessibleName())
     title, tooltip = button.accessibleName(), button.toolTip()
     button.setFixedWidth(30)

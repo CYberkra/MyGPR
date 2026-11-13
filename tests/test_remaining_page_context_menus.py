@@ -65,7 +65,7 @@ def test_interpretation_remove_uses_hit_point_and_blank_menu_has_no_old_target(p
     page.set_busy(True)
     locked = page._point_menu(table.visualItemRect(table.item(0, 0)).center())
     assert not action(locked, 'remove-point').isEnabled()
-    assert '忙' in action(locked, 'remove-point').text()
+    assert '正在处理' in action(locked, 'remove-point').text()
 
 
 def test_spatial_line_menu_visibility_is_display_only_and_id_is_frozen(pages):
