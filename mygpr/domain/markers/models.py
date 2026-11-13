@@ -79,14 +79,11 @@ class EventInterval:
     start_marker_revision: int = 0
     end_marker_revision: int = 0
     revision: int = 1
-    review_state: str = 'unreviewed'
     excluded: bool = False
     links: tuple[str, ...] = ()
 
     def __post_init__(self):
         _record_fields(self)
-        if self.review_state not in ('unreviewed', 'reviewed', 'needs_review'):
-            raise ValueError('区间复核状态无效')
         if type(self.include_start) is not bool or type(self.include_end) is not bool:
             raise ValueError('边界包含状态必须为布尔值')
         if (self.start or self.end) and (self.time_start or self.time_end):
@@ -127,6 +124,9 @@ def _record_fields(record) -> None:
 
 def record_from_dict(payload: dict[str, Any], *, interval: bool = False):
     values = deepcopy(payload)
+    if interval:
+        # Older projects stored a workflow flag independently of their boundary snapshots.
+        values.pop('review_state', None)
     for name in (('start', 'end') if interval else ('anchor',)):
         value = values.get(name)
         if value is not None:

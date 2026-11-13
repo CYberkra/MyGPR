@@ -236,7 +236,7 @@ def test_same_id_new_digest_does_not_reuse_preview_or_draft(page):
     assert page.current_pipeline()['steps'] == []
     assert page._draft_key() != old_key
     assert page._drafts[old_key]['steps'][0]['params'] == {'window': 41}
-    assert '失效' in page._draft_revision_hint.text()
+    assert '数据已更新' in page._draft_revision_hint.text()
     page.select_artifact('B')
     page.select_artifact('A')
     assert page.current_pipeline()['steps'] == []

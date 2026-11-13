@@ -307,7 +307,7 @@ class _SessionCommand:
             c._completed.emit(_Completion(context, "failed", message="后端尚未就绪"))
             return
         if self._kind != "opened" and context.session_id is None:
-            c._completed.emit(_Completion(context, "failed", message="请先打开标注会话"))
+            c._completed.emit(_Completion(context, "failed", message="请先开始标注"))
             return
         if not context.busy_lock.acquire(blocking=False):
             c._completed.emit(_Completion(context, "busy"))

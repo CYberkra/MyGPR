@@ -512,19 +512,21 @@ class TestCardClose:
 
 
 class TestParamEmptyHint:
-    """参数卡空态：表单无字段时显示引导文案（真机走查遗留项）。"""
+    """The parameter pane only reports missing fields for a selected step."""
 
     def test_hint_toggles_with_form_schema(self, qapp):
         page = ProcessingPage()
         try:
             parent = page._param_empty_hint.parentWidget()
-            assert page._param_empty_hint.isVisibleTo(parent)
+            assert not page._param_empty_hint.isVisibleTo(parent)
             page._methods_by_id['agc'] = {'parameter_schema': [
                 {'name': 'window', 'label': '窗口', 'type': 'int',
                  'default': 5, 'min': 1, 'max': 100}]}
             page._pipeline_list.add_step('agc', 'AGC', {})
             assert not page._param_empty_hint.isVisibleTo(parent)
             page._pipeline_list._list.setCurrentRow(-1)
+            assert not page._param_empty_hint.isVisibleTo(parent)
+            page._pipeline_list.add_step('without_params', '无参数算法', {})
             assert page._param_empty_hint.isVisibleTo(parent)
         finally:
             page.close()
@@ -1119,16 +1121,18 @@ class TestDeepAudit20261009:
             strip.deleteLater()
 
     # ---------------- P2：链空态引导 ----------------
-    def test_empty_chain_shows_hint(self, qapp):
+    def test_empty_chain_shows_add_action(self, qapp):
         strip = self._strip()
         try:
             strip.show()
             strip.set_steps([])
             qapp.processEvents()
-            assert strip._empty_hint.isVisibleTo(strip) is True
+            assert strip._empty_add.isVisibleTo(strip)
+            assert not strip._add_btn.isVisibleTo(strip)
             strip.set_steps([{'label': 'a', 'enabled': True}])
             qapp.processEvents()
-            assert strip._empty_hint.isVisibleTo(strip) is False
+            assert not strip._empty_add.isVisibleTo(strip)
+            assert strip._add_btn.isVisibleTo(strip)
         finally:
             strip.deleteLater()
 

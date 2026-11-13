@@ -17,8 +17,8 @@ def interval_indices(interval: EventInterval, mapping: TraceMapping, *,
 def interval_bounds(interval: EventInterval, mapping: TraceMapping, *,
                     timestamps_s=None, time_basis_confirmed=False) -> tuple[int, int]:
     """Resolve two bounds without allocating every selected index during list projection."""
-    if interval.excluded or interval.review_state == 'needs_review':
-        raise ValueError('区间已排除或边界变化后尚需复核')
+    if interval.excluded:
+        raise ValueError('区间已排除')
     if not interval.closed:
         raise ValueError('区间尚未闭合')
     count = len(mapping.coordinates)

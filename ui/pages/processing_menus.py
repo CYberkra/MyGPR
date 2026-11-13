@@ -106,12 +106,12 @@ class ProcessingMenus:
         object_action(menu, 'open-final', '打开最终成果', lambda: current(lambda: self.select_artifact(final_id)))
         object_action(menu, 'open-saved-steps', '打开本次已保存步骤',
                       lambda: current(lambda: [self.select_artifact(str(art.artifact_id)) for art in members]))
-        object_action(menu, 'locate-run-input', '定位冻结输入',
+        object_action(menu, 'locate-run-input', '打开当时使用的数据',
                       lambda: current(lambda: input_current(lambda: self._workspace.open_source(saved[0]))),
-                      enabled=saved is not None, reason='输入缺失、修订变化或来源待核对')
-        object_action(menu, 'reconfigure-run', '按原输入重新配置本次运行…',
+                      enabled=saved is not None, reason='当时使用的数据无法打开')
+        object_action(menu, 'reconfigure-run', '载入这次的步骤和参数…',
                       lambda: current(lambda: input_current(lambda: self.reconfigure_run(group))),
-                      enabled=saved is not None, reason='缺少完整配置、有效原输入或输入草稿被锁定')
+                      enabled=saved is not None, reason='缺少原输入或完整步骤')
         record = {'run_group_id': group, 'project_id': scope[0], 'line_id': scope[1],
                   'outputs': [{'artifact_id': str(art.artifact_id), 'status': str(getattr(art, 'status', '')),
                                'sha256': str(getattr(art, 'sha256', '') or ''), 'params': artifact_parameters(art)} for art in members]}
@@ -157,8 +157,8 @@ class ProcessingMenus:
         stale = [{'revision': k[3], 'draft': value} for k, value in self._drafts.items()
                  if k[:3] == key[:3] and k != key and value.get('steps')]
         if stale:
-            object_action(menu, 'stale-drafts', '查看旧修订草稿（已失效）…', lambda: current(lambda:
-                self._show_details('旧修订草稿 · 已失效，不能用于当前数据',
+            object_action(menu, 'stale-drafts', '查看旧步骤…', lambda: current(lambda:
+                self._show_details('数据更新前的处理步骤',
                                    json.dumps(stale, ensure_ascii=False, indent=2, default=str))))
         return menu
 

@@ -62,6 +62,38 @@ def test_keep_exclude_commit_exact_columns_and_reopen_mapping(project):
     assert reopened.rows[0]['projection'] == projected.rows[0]['projection']
 
 
+def test_linked_interval_uses_saved_range_until_an_endpoint_moves(project):
+    backend, pid, _, _ = project
+    view = backend.markers.view(pid, 'L01')
+    point = MarkerRecord(name='起点', anchor=view.anchor(1))
+    backend.markers.edit(view, point)
+    view = backend.markers.view(pid, 'L01')
+    interval = EventInterval(name='停车等待', start=point.anchor, end=view.anchor(4),
+                             start_marker_id=point.uid, start_marker_revision=point.revision)
+    backend.markers.edit(view, interval)
+
+    view = backend.markers.view(pid, 'L01')
+    point, = view.document.markers
+    saved, = view.document.intervals
+    backend.markers.edit(view, replace(point, note='文字补充'))
+    view = backend.markers.view(pid, 'L01')
+    assert view.document.intervals == (saved,)
+    assert backend.markers.preview(view, [interval.uid], 'keep')['affected_count'] == 4
+
+    point, = view.document.markers
+    backend.markers.edit(view, replace(point, anchor=view.anchor(2)))
+    view = backend.markers.view(pid, 'L01')
+    assert view.rows[-1]['status'] == '起点已移动'
+    assert not view.rows[-1]['projection'].spans
+    with pytest.raises(ValueError, match='起点已移动'):
+        backend.markers.preview(view, [interval.uid], 'keep')
+
+    point, = view.document.markers
+    backend.markers.edit(view, replace(saved, start=point.anchor, start_marker_revision=point.revision))
+    view = backend.markers.view(pid, 'L01')
+    assert backend.markers.preview(view, [interval.uid], 'keep')['affected_count'] == 3
+
+
 def test_stale_preview_and_edit_refused_and_snapshot_stable(project):
     backend, pid, _, tmp_path = project
     event = save_event(backend, pid, 2, 3)

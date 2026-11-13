@@ -68,12 +68,12 @@ class _ViewGroup(QWidget):
         self.markers_visibility.setCheckable(True)
         self.markers_visibility.setChecked(True)
         self.markers_visibility.setEnabled(False)
-        self.markers_visibility.setToolTip('显示／隐藏采集标记')
-        self.markers_visibility.setAccessibleName('显示采集标记')
+        self.markers_visibility.setToolTip('显示或隐藏图上标记')
+        self.markers_visibility.setAccessibleName('显示图上标记')
         self.display_settings = TransparentToolButton(FIF.SETTING, self)
         self.display_settings.setFixedSize(*constants.TOOL_BTN_SIZE)
-        self.display_settings.setToolTip('当前图显示')
-        self.display_settings.setAccessibleName('当前图显示')
+        self.display_settings.setToolTip('当前视图显示设置')
+        self.display_settings.setAccessibleName('当前视图显示设置')
         self.fit_view = TransparentToolButton(FIF.FIT_PAGE, self)
         self.fit_view.setFixedSize(*constants.TOOL_BTN_SIZE)
         self.fit_view.setToolTip('适应全图')
@@ -779,7 +779,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             menu.addSeparator()
             object_action(menu, 'fit-all', '适应全图', group.view.fit_all,
                           enabled=group.view._image_shape is not None)
-            object_action(menu, 'view-display', '当前图显示…', lambda: group.view.show_display_menu(
+            object_action(menu, 'view-display', '当前视图显示设置…', lambda: group.view.show_display_menu(
                 group.more.mapToGlobal(group.more.rect().bottomLeft())))
         return menu
 

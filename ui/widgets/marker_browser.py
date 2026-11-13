@@ -22,14 +22,13 @@ class MarkerBrowserButton(QPushButton):
     def open_browser(self):
         if self.dialog is None:
             self.dialog = QDialog(self.window())
-            self.dialog.setWindowTitle('项目标记与事件区间')
+            self.dialog.setWindowTitle('项目标记')
             available = self.screen().availableGeometry()
             self.dialog.resize(min(650, available.width() - 32), min(620, available.height() - 48))
             layout = QVBoxLayout(self.dialog)
-            self.panel = MarkerPanel(self.dialog)
+            self.panel = MarkerPanel(self.dialog, embedded=False)
             layout.addWidget(self.panel)
             self.panel.operation.connect(self.operation)
-            self.panel.close_requested.connect(self.dialog.hide)
             self.panel.navigate.connect(self._navigate)
             self.panel.selected.connect(self._selected)
             self.panel.locate.connect(self._locate)

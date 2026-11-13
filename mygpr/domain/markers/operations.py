@@ -50,26 +50,34 @@ def put_record(document: MarkerDocument, record: MarkerRecord | EventInterval) -
     if is_interval:
         _validate_references(document, record)
         return replace(document, intervals=cast(tuple[EventInterval, ...], updated))
-    intervals = tuple(
-        replace(item, review_state='needs_review', revision=item.revision + 1)
-        if previous and record.uid in (item.start_marker_id, item.end_marker_id) else item
-        for item in document.intervals
-    )
-    return replace(document, markers=cast(tuple[MarkerRecord, ...], updated), intervals=intervals)
+    return replace(document, markers=cast(tuple[MarkerRecord, ...], updated))
 
 
-def _validate_references(document, interval):
-    markers = {item.uid: item for item in document.markers}
-    for side in ('start', 'end'):
+def interval_boundary_issue(interval: EventInterval, markers: dict[str, MarkerRecord]) -> str:
+    for side, label in (('start', '起点'), ('end', '终点')):
         uid = getattr(interval, f'{side}_marker_id')
         if not uid:
             continue
         mark = markers.get(uid)
-        if mark is None or mark.excluded:
-            raise ValueError('区间引用的标记不存在或已排除')
-        if (getattr(interval, side) != mark.anchor
-                or getattr(interval, f'{side}_marker_revision') != mark.revision):
-            raise ValueError('区间边界版本已变化，请重新确认')
+        if mark is None:
+            return f'{label}不存在'
+        if mark.excluded:
+            return f'{label}已排除'
+        if mark.anchor is None:
+            return f'{label}无道号'
+        if getattr(interval, side) != mark.anchor:
+            return f'{label}已移动'
+    return ''
+
+
+def _validate_references(document, interval):
+    markers = {item.uid: item for item in document.markers}
+    if issue := interval_boundary_issue(interval, markers):
+        raise ValueError(issue)
+    for side in ('start', 'end'):
+        uid = getattr(interval, f'{side}_marker_id')
+        if uid and getattr(interval, f'{side}_marker_revision') > markers[uid].revision:
+            raise ValueError('边界标记版本无效')
 
 
 def remove_record(document: MarkerDocument, uid: str) -> MarkerDocument:
@@ -103,5 +111,5 @@ def validate_transition(current: MarkerDocument, proposed: MarkerDocument) -> No
         if isinstance(item, EventInterval):
             if any(uid and uid not in following for uid in (item.start_marker_id, item.end_marker_id)):
                 raise ValueError('区间引用的标记不存在')
-            if item.review_state != 'needs_review':
+            if item != old:
                 _validate_references(proposed, item)

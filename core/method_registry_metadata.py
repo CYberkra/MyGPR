@@ -48,7 +48,7 @@ METHOD_METADATA = {
         "maturity": "stable",
         "visibility": "public",
         "display_name": "时间窗裁剪",
-        "description": "按指定时间范围裁剪或屏蔽数据，具体行为由裁剪模式决定。 检索别名：time window crop。",
+        "description": "沿剖面纵轴按双程走时裁剪。 检索别名：time window crop。",
     },
     "trace_cut": {
         "category": "time_correction",

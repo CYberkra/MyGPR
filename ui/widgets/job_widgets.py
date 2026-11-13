@@ -112,6 +112,12 @@ class JobTable(QWidget):
         layout.addLayout(self._stack)
 
     def _update_empty_state(self) -> None:
+        status_messages = {
+            ('queued', 'running', 'failed'): '没有排队、运行中或失败的任务',
+            ('completed', 'cancelled', 'failed'): '无已结束任务',
+        }
+        filtered = status_messages.get(tuple(self._statuses or ()), '无匹配任务')
+        self._empty_label.setText(filtered if self._rows and self._statuses is not None else '暂无任务')
         self._stack.setCurrentIndex(int(any(not self._table.isRowHidden(row)
                                             for row in self._rows.values())))
 
@@ -312,11 +318,13 @@ class JobTable(QWidget):
             return {}
         title = self._table.item(row, self._COL_TITLE)
         message = self._table.item(row, self._COL_MESSAGE)
+        status = str(self._status_of(row) or '')
         return {
             'job_id': job_id,
             'title': title.text() if title is not None else '',
             'message': message.text() if message is not None else '',
-            'status': str(self._status_of(row) or ''),
+            'status': status,
+            'status_text': _STATUS_TEXT.get(status, status),
         }
 
     def can_cancel(self, job_id: str) -> bool:

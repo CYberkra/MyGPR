@@ -159,7 +159,7 @@ def _summarize_parameter_domain(
     if constraint_adjustment_count > 0:
         notes.append("部分候选参数被按数据尺度收缩，实际搜索域小于原始候选列表。")
     if best_params_at_edge:
-        notes.append("最优参数贴近有效搜索域边界，建议结合人工参数再核查。")
+        notes.append("最优参数位于有效搜索范围的边缘。")
     if len(unique_effective_signatures) <= 2 and len(trials) > 1:
         notes.append("有效搜索域较窄，当前数据对该方法的可辨识度偏低。")
 
@@ -188,7 +188,7 @@ def _summarize_parameter_domain(
         risk_reason = "自动推荐稳定，参数域与评分差距都较健康。"
     else:
         selection_recommendation = "review"
-        risk_reason = "；".join(notes) if notes else "当前结果建议人工复核。"
+        risk_reason = "；".join(notes) if notes else "候选评分接近，当前数据难以区分效果。"
 
     return {
         "method_key": method_key,

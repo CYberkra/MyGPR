@@ -127,6 +127,7 @@ class ProjectChain:
 
         # ---------------- 空间信息页：设为当前测线（测线归属项目域）
         spatial.current_line_requested.connect(self.on_spatial_current_line)
+        spatial.sensor_sync_requested.connect(self.on_spatial_sensor_sync)
 
         # ---------------- Spatial results and project delivery
         delivery.spatial_requested.connect(self.on_spatial_requested)
@@ -378,7 +379,7 @@ class ProjectChain:
         co.processing.velocity_token = None
         page = co.page('interpretationInterface')
         page.set_session_active(False)
-        page.set_session_info('未打开会话')
+        page.set_session_info('')
         page.set_points([])
         page.set_bundle(None)
         page.set_artifacts([])
@@ -543,6 +544,14 @@ class ProjectChain:
         if not self.on_line_selected(line_id):
             return
         self._co.infobar('success', '空间信息', f'已设为当前测线：{line_id}')
+
+    def on_spatial_sensor_sync(self, line_id: str) -> None:
+        project = self._co.page('projectInterface')
+        if not project._can_write() or (line_id and not self.on_line_selected(line_id)):
+            return
+        self._co.goto_page('projectInterface')
+        if line_id:
+            project.show_sensor_tool()
 
     def on_artifacts_updated(self, line_id: str, artifacts: list) -> None:
         """artifacts_updated → 项目页/处理页成果表；处理完成后自动预览最新成果。"""
@@ -787,11 +796,9 @@ class ProjectChain:
         fmt = str(getattr(result, 'format_name', '') or '')
         samples = int(getattr(result, 'sample_count', 0) or 0)
         traces = int(getattr(result, 'trace_count', 0) or 0)
-        parts = [message] if message else []
-        if fmt:
-            parts.append(f'格式: {fmt}')
-        if samples and traces:
-            parts.append(f'数据: {samples} 采样 × {traces} 道')
+        size = f'{samples} 采样点 × {traces} 道' if samples and traces else ''
+        summary = ' · '.join(part for part in (fmt, size) if part)
+        parts = [part for part in (summary, message) if part]
         suggestions = [str(s) for s in (getattr(result, 'suggestions', ()) or ())]
         parts.extend(suggestions)
         project.set_preflight_result('\n'.join(parts) or '预检完成', can_import)

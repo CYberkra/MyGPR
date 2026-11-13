@@ -60,7 +60,7 @@ class ProcessingSidebar:
         actions = QHBoxLayout()
         self._discard_step_btn = PushButton('放弃修改', self._step_tools)
         self._discard_step_btn.clicked.connect(self._load_selected_step)
-        self._commit_step_btn = PrimaryPushButton('应用到草稿', self._step_tools)
+        self._commit_step_btn = PrimaryPushButton('应用参数', self._step_tools)
         self._commit_step_btn.clicked.connect(self._commit_step_form)
         actions.addWidget(self._discard_step_btn)
         actions.addWidget(self._commit_step_btn, 1)
@@ -120,7 +120,8 @@ class ProcessingSidebar:
             return
         self._close_gain_previews()
         method = self._methods_by_id.get(method_id, {})
-        self._step_detail.setText(str(method.get('description') or ''))
+        description = str(method.get('description') or '')
+        self._step_detail.setText(description.partition('检索别名：')[0].rstrip())
         self._load_parameter_values(method_id, {})
         self._step_feedback.clear()
         self._sync_step_tools()
@@ -140,7 +141,6 @@ class ProcessingSidebar:
 
     def _append_library_method(self, method_id, params):
         self._add_method_to_pipeline(method_id, params)
-        self._step_feedback.setText(f'已添加第 {self._pipeline_list.count()} 步')
         self._sync_step_tools()
 
     def _open_step_editor(self, index):
@@ -229,7 +229,6 @@ class ProcessingSidebar:
         params.update(self._param_form.values())
         self._step_edits.pop(self._editor_uid)
         self._pipeline_list.update_step_params(index, params)
-        self._step_feedback.setText('已应用到草稿')
         self._sync_step_tools()
 
     def _commit_library_choice(self):
@@ -266,17 +265,19 @@ class ProcessingSidebar:
         self._step_detail.setVisible(browsing and bool(self._step_detail.text()))
         self._param_form.setVisible(has_schema)
         self._param_form.setEnabled(can_edit)
-        self._param_empty_hint.setVisible(not browsing and not has_schema)
+        self._step_tools.setVisible(browsing or has_step)
+        self._processing_options.setVisible(not browsing)
+        self._param_empty_hint.setVisible(not browsing and has_step and not has_schema)
         self._param_empty_hint.setText('此算法无可编辑参数' if has_step else '未选择处理步骤')
         self._discard_step_btn.setVisible(not browsing and pending)
         self._discard_step_btn.setEnabled(can_edit)
         self._commit_step_btn.setVisible(browsing or has_schema)
         if browsing:
             replacing = self._picker_context[1] is not None
-            self._commit_step_btn.setText('确认替换' if replacing else '添加到处理链')
+            self._commit_step_btn.setText('替换步骤' if replacing else '添加步骤')
             self._commit_step_btn.setEnabled(self._valid_library_choice(self._method_browser.current_method_id()))
         else:
-            self._commit_step_btn.setText('应用到草稿')
+            self._commit_step_btn.setText('应用参数')
             self._commit_step_btn.setEnabled(can_edit and pending)
         self._step_feedback.setVisible(bool(self._step_feedback.text()))
 

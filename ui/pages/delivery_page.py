@@ -289,7 +289,7 @@ class DeliveryPage(QWidget):
         self._retention_spin.setRange(1, 100)
         self._retention_spin.setValue(10)
         self._retention_spin.setToolTip(
-            '保留最近指定数量的恢复点及其必需增量祖先；实际 ZIP 档案数量可能超过该数量。')
+            '同时保留恢复所需的旧备份')
         options_row.addWidget(self._retention_spin)
         options_row.addWidget(CaptionLabel('个恢复点'))
         options_row.addStretch(1)

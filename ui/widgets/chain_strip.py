@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (QAbstractItemView, QApplication, QHBoxLayout, QLabe
                              QListWidget, QListWidgetItem, QWidget)
 from PyQt6.QtWidgets import QPushButton
 from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
-                            PrimaryPushButton, RoundMenu, ToolButton)
+                            PrimaryPushButton, PushButton, RoundMenu, ToolButton)
 
 from ui import constants, motion
 from ui.widgets.context_menus import add_action, make_menu, show_menu
@@ -332,7 +332,7 @@ class ChainStrip(QWidget):
 
         self._add_btn = ToolButton(FIF.ADD, self)
         self._add_btn.setFixedSize(*constants.TOOL_BTN_SIZE)
-        self._add_btn.setToolTip('添加处理步骤（弹出方法选择器，双击加入链尾）')
+        self._add_btn.setToolTip('打开算法库')
         self._add_btn.setAccessibleName('添加处理步骤')
         self._add_btn.clicked.connect(self.sig_add_requested)
         self._dirty_label = CaptionLabel('已修改 · 点运行更新', self)
@@ -354,14 +354,11 @@ class ChainStrip(QWidget):
         self._overlay_timer = QTimer(self)
         self._overlay_timer.setSingleShot(True)
         self._overlay_timer.timeout.connect(self._update_overlays)
-        # 空链引导（2026-10-09 深查 P2）：空链时列表区一片空白，新用户
-        # 不知道从哪开始——浮层文字提示（不挡鼠标，＋ 钮照常可点）
-        self._empty_hint = CaptionLabel('从左侧方法库添加算法',
-                                        self._list.viewport())
-        self._empty_hint.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._empty_hint.setStyleSheet(f'color:{color("text_muted")}')
-        self._empty_hint.setVisible(False)
+        self._empty_add = PushButton('添加步骤', self, FIF.ADD)
+        self._empty_add.setToolTip('打开算法库')
+        self._empty_add.clicked.connect(self.sig_add_requested)
+        self._add_btn.hide()
+        self._list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # 溢出胶囊（2026-10-09 深查 P1）：浮在列表右缘，放不下的 chip 折叠
         # 成 +N，点击弹全部步骤菜单。做成视口浮层而非行内控件——不挤占
         # 本就紧张的 chip 空间（行内加控件会反过来缩小视口，测量振荡）
@@ -375,6 +372,7 @@ class ChainStrip(QWidget):
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(constants.CARD_SPACING)
+        row.addWidget(self._empty_add)
         row.addWidget(self._list, 1)
         row.addWidget(self._dirty_label)
         row.addWidget(self._add_btn)
@@ -387,14 +385,15 @@ class ChainStrip(QWidget):
 
     def add_button(self):
         """打开算法库的加号按钮。"""
-        return self._add_btn
+        return self._add_btn if self._list.count() else self._empty_add
+
+    def set_add_enabled(self, enabled: bool) -> None:
+        self._add_btn.setEnabled(enabled)
+        self._empty_add.setEnabled(enabled)
 
     def set_run_button_visible(self, visible: bool) -> None:
         """Hosts with a shared header action can reclaim the strip's button space."""
         self._run_btn.setVisible(visible)
-
-    def set_empty_hint(self, text: str) -> None:
-        self._empty_hint.setText(str(text))
 
     def step_anchor(self, index: int):
         """Return the current rendered chip for the host's parameter popup."""
@@ -432,7 +431,6 @@ class ChainStrip(QWidget):
                 self._steps[idx]['enabled']
                 if 0 <= idx < len(self._steps) else True)
         self._dirty_label.setStyleSheet(f'color:{color("warning")}')
-        self._empty_hint.setStyleSheet(f'color:{color("text_muted")}')
         self._style_overflow_btn()
         self._pill.setStyleSheet(
             f'background:{rgba("primary", 0.08)};'
@@ -703,7 +701,9 @@ class ChainStrip(QWidget):
         self._move_pill(lst.currentRow())
         vp = lst.viewport()
         n = lst.count()
-        self._empty_hint.setVisible(n == 0)
+        self._empty_add.setVisible(n == 0)
+        self._add_btn.setVisible(n > 0)
+        self._list.setFocusPolicy(Qt.FocusPolicy.StrongFocus if n else Qt.FocusPolicy.NoFocus)
         hidden = 0
         if n and vp.width() > 0:
             for i in range(n):
@@ -720,9 +720,6 @@ class ChainStrip(QWidget):
                 max(0, vp.width() - self._overflow_btn.width() - 2),
                 max(0, (vp.height() - self._overflow_btn.height()) // 2))
             self._overflow_btn.raise_()
-        self._empty_hint.adjustSize()
-        self._empty_hint.move(
-            12, max(0, (vp.height() - self._empty_hint.height()) // 2))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

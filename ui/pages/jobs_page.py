@@ -30,13 +30,13 @@ class JobsPage(QWidget):
         button_row = QHBoxLayout()
         button_row.setSpacing(constants.CARD_SPACING)
         self._filter = ComboBox(self)
-        self._filter.addItem('活动与失败', userData=('queued', 'running', 'failed'))
+        self._filter.addItem('进行中与失败', userData=('queued', 'running', 'failed'))
         self._filter.addItem('全部任务', userData=None)
         self._filter.addItem('已结束', userData=('completed', 'cancelled', 'failed'))
         button_row.addWidget(self._filter)
         button_row.addStretch(1)
-        self._prune_btn = PushButton('清理终态记录', self)
-        self._prune_btn.setToolTip('清除已完成/失败的任务行')
+        self._prune_btn = PushButton('清理已结束记录', self)
+        self._prune_btn.setToolTip('从列表清除已结束任务记录')
         button_row.addWidget(self._prune_btn)
         root.addLayout(button_row)
         self._job_table = JobTable(self)
@@ -68,6 +68,7 @@ class JobsPage(QWidget):
         counter = getattr(self._job_table, 'finished_count', None)
         count = int(counter()) if callable(counter) else 0
         self._prune_btn.setEnabled(count > 0)
+        self._prune_btn.setVisible(count > 0)
 
     def _on_prune_clicked(self) -> None:
         """清理已完成：本地移除终态行并发 prune_requested。"""
@@ -83,11 +84,13 @@ class JobsPage(QWidget):
             snapshot = self._job_table.job_snapshot(job_id)
             title = snapshot['title']
             message = snapshot['message']
-            status = snapshot['status']
-            text = f'任务标识: {job_id}\n标题: {title}\n状态: {status}\n消息: {message}'
-            object_action(menu, 'job-details', '详情与当前消息…',
+            status = snapshot['status_text']
+            text = f'{title}\n状态：{status}\n任务编号：{job_id}'
+            if message:
+                text += f'\n\n{message}'
+            object_action(menu, 'job-details', '任务详情…',
                           lambda: show_details(self, '任务详情', text))
-            object_action(menu, 'copy-id', '复制任务标识',
+            object_action(menu, 'copy-id', '复制任务编号',
                           lambda: QApplication.clipboard().setText(job_id))
             object_action(menu, 'copy-message', '复制当前消息',
                           lambda: QApplication.clipboard().setText(message),

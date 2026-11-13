@@ -124,7 +124,7 @@ class SettingsPage(ScrollArea):
 
         低频显示偏好集中在此；改动即时应用到所有测线与视图并跨会话保存。
         """
-        card, layout = make_card('B-Scan 视图')
+        card, layout = make_card('B-scan 默认显示')
         self._build_bscan_axis_section(layout, card)
         self._build_bscan_visibility_section(layout, card)
         self._build_bscan_appearance_section(layout, card)
@@ -132,7 +132,7 @@ class SettingsPage(ScrollArea):
 
     def _build_bscan_visibility_section(self, layout, card) -> None:
         layout.addWidget(self._section_header('查看与标记', card))
-        self._bscan_levels_follow_check = CheckBox('色阶跟随查看范围（全局）', card)
+        self._bscan_levels_follow_check = CheckBox('色阶跟随查看范围', card)
         self._bscan_levels_follow_check.setToolTip(
             '缩放、框选或平移时，按可见数据定标；关闭后按整条测线定标。'
             '所有测线与视图共用此设置；统一色阶比较时仍保持固定色阶。')

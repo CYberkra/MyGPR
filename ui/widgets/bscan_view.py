@@ -653,6 +653,8 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
 
     def set_acquisition_markers_visible(self, visible: bool) -> None:
         self._acquisition_markers_visible = bool(visible)
+        for guide in self._event_guides:
+            guide.setVisible(self._acquisition_markers_visible)
         if self._marker_view is not None:
             if visible:
                 self.marker_strip.refresh_visibility()

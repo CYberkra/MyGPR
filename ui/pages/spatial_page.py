@@ -40,7 +40,7 @@ from ui.spatial_view_sync import ViewSyncMixin
 from ui.pages.spatial_context_menus import SpatialContextMenuMixin
 from ui.pages.spatial_delivery import SpatialDeliveryMixin
 from ui.page_scaffold import (PanelStateMixin, make_card,
-                              make_collapsible_column, make_hint,
+                              make_collapsible_column,
                               make_segment_card,
                               rebuild_check_list)
 from ui.widgets.elevation_profile_view import ElevationProfileView
@@ -103,6 +103,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
     """空间信息页面。"""
 
     current_line_requested = pyqtSignal(str)    # 设为当前测线（line_id）
+    sensor_sync_requested = pyqtSignal(str)
     basemap_prefetch_requested = pyqtSignal()   # 预下载当前区域（页面内部已处理，供外部观测）
     depth_preview_requested = pyqtSignal(list, float)  # line_ids, cell_size_m
     save_depth_layer_requested = pyqtSignal(list, float)  # 存为图层（line_ids, cell_size_m）
@@ -114,6 +115,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         super().__init__(parent)
         self._closed = False
         self._tracks = []            # 全量 SpatialTrack
+        self._has_track_points = False
         self._tracks_by_id = {}
         self._lines_by_id = {}       # 测线记录（rtk_status 等）
         self._colors = {}            # line_id -> '#rrggbb'
@@ -141,6 +143,10 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
 
         self._build_ui()
         self._connect_internal()
+        self._update_track_empty_state()
+        self._refresh_crs_card()
+        self._refresh_detail()
+        self._refresh_coverage_statistics()
         self._restore_state()
 
     # ============================================================ 设置注入
@@ -286,12 +292,6 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         self._line_list = QListWidget(lines_card)
         self._line_list.setMinimumHeight(180)
         lines_layout.addWidget(self._line_list, 1)
-        # 空态引导：无测线时列表藏起、提示占位（参照 home_page 空项目做法）
-        self._lines_empty_hint = make_hint('暂无测线，请先在项目管理页导入',
-                                           parent=lines_card)
-        self._lines_empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lines_layout.addWidget(self._lines_empty_hint, 1)
-        self._line_list.setVisible(False)
         left_layout.addWidget(lines_card, 1)
 
         basemap_card, basemap_layout = make_card('底图')
@@ -304,7 +304,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         basemap_layout.addLayout(source_row)
         self._prefetch_btn = PushButton('预下载测线区域', basemap_card, FIF.DOWNLOAD)
         basemap_layout.addWidget(self._prefetch_btn)
-        self._prefetch_view_btn = PushButton('预下载当前视野', basemap_card)
+        self._prefetch_view_btn = PushButton('下载当前范围底图', basemap_card)
         basemap_layout.addWidget(self._prefetch_view_btn)
         self._prefetch_label = CaptionLabel('', basemap_card)
         self._prefetch_label.setWordWrap(True)
@@ -312,7 +312,8 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         left_layout.addWidget(basemap_card)
 
         crs_card, crs_layout = make_card('投影信息')
-        self._crs_label = CaptionLabel('暂无轨迹数据', crs_card)
+        self._crs_card = crs_card
+        self._crs_label = CaptionLabel('', crs_card)
         self._crs_label.setWordWrap(True)
         crs_layout.addWidget(self._crs_label)
         left_layout.addWidget(crs_card)
@@ -426,6 +427,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
 
         self._view_stack = QStackedWidget(view_card)
         self._map_view = MapView(view_card)
+        self._map_view.sync_track_button.clicked.connect(self._request_missing_track_sync)
         self._map_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
         self._profile_view = ElevationProfileView(view_card)
         self._profile_view.setMinimumHeight(constants.PREVIEW_MIN_HEIGHT)
@@ -462,9 +464,9 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         self._depth_cell_spin.setDecimals(2)
         self._depth_cell_spin.setSingleStep(0.25)
         self._depth_cell_spin.setValue(1.0)
-        self._depth_cell_spin.setSuffix(' m/格')
-        self._depth_cell_spin.setToolTip('界面深度控制点的单元格均值网格；不是雷达振幅 C-scan')
-        depth_row.addWidget(CaptionLabel('格网', self._depth_row_widget))
+        self._depth_cell_spin.setSuffix(' m')
+        self._depth_cell_spin.setToolTip('每个网格单元的边长')
+        depth_row.addWidget(CaptionLabel('网格尺寸', self._depth_row_widget))
         depth_row.addWidget(self._depth_cell_spin)
         depth_row.addWidget(CaptionLabel('等深线', self._depth_row_widget))
         depth_row.addWidget(self._depth_slider, 1)
@@ -487,6 +489,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         right_layout = self._build_spatial_delivery(right_layout, _SEG_MAP)
 
         detail_card, detail_layout = make_card('测线详情')
+        self._detail_card = detail_card
         self._detail_labels = {}
         for key, title in (('name', '名称'), ('traces', '道数'),
                            ('elevation', '高程范围'), ('rtk', 'RTK状态'),
@@ -507,6 +510,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         detail_layout.addWidget(self._set_current_btn)
 
         coverage_card, coverage_layout = make_card('项目覆盖统计')
+        self._coverage_card = coverage_card
         self._coverage_labels = {}
         for key, title in (('tracks', '含轨迹测线'), ('points', '轨迹点数'),
                            ('length', '总里程'), ('spacing', '平均点距')):
@@ -569,6 +573,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         """空间轨迹列表（SpatialTrack，鸭子类型取属性）。"""
         self._line_context.close()
         self._tracks = list(tracks or [])
+        self._refresh_coverage_statistics()
         self._tracks_by_id = {}
         self._colors = {}
         for index, track in enumerate(self._tracks):
@@ -589,17 +594,10 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
             icon_fn=lambda track: _color_icon(
                 self._colors[str(getattr(track, 'line_id', '') or '')]))
 
-        # 空态显隐：有测线显示勾选列表，无测线显示引导文案
-        has_lines = self._line_list.count() > 0
-        self._line_list.setVisible(has_lines)
-        self._lines_empty_hint.setText('测线缺少定位轨迹，请先同步传感器' if self._lines_by_id
-                                       else '暂无测线，请先在项目管理页导入')
-        self._lines_empty_hint.setVisible(not has_lines)
+        self._update_track_empty_state()
 
         self._refresh_views()
-        self._refresh_crs_card()
         self._refresh_detail()
-        self._refresh_coverage_statistics()
         # 轨迹就绪后自动预下载测线所在地理区域（延迟执行，等视图 fit 完成）
         self._defer(self._auto_prefetch_tracks, 800)
 
@@ -614,9 +612,29 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
             line_id = str(getattr(line, 'line_id', '') or '')
             if line_id:
                 self._lines_by_id[line_id] = line
-        self._lines_empty_hint.setText('测线缺少定位轨迹，请先同步传感器' if self._lines_by_id
-                                       else '暂无测线，请先在项目管理页导入')
+        self._update_track_empty_state()
         self._refresh_detail()
+
+    def _update_track_empty_state(self) -> None:
+        self._line_list.parentWidget().setVisible(self._has_track_points)
+        if not self._lines_by_id and not self._tracks:
+            message = '暂无测线'
+        elif self._has_track_points and not self._checked_tracks():
+            message = '未显示任何测线'
+        else:
+            line_id = next(iter(self._lines_by_id)) if len(self._lines_by_id) == 1 else ''
+            message = f'{line_id} 缺少定位轨迹' if line_id else '测线缺少定位轨迹'
+        self._map_view.set_empty_message(message, can_sync=self._can_offer_track_sync())
+
+    def _can_offer_track_sync(self) -> bool:
+        return bool(self._lines_by_id and not self._has_track_points and not self.delivery_tools._read_only)
+
+    def _request_missing_track_sync(self) -> None:
+        if self._can_offer_track_sync():
+            line_id = self._selected_line_id()
+            if not line_id and len(self._lines_by_id) == 1:
+                line_id = next(iter(self._lines_by_id))
+            self.sensor_sync_requested.emit(line_id)
 
     def set_depth_grid(self, payload: dict, line_ids: list,
                        cell_size_m: float) -> None:
@@ -766,6 +784,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         重建），三维视图每次都白付 130–470 ms 的 GL 重建 + numpy 变换。
         """
         tracks = self._checked_tracks()
+        self._update_track_empty_state()
         active = self._active_view_key()
         self._view_data = (tracks, self._colors)
         fingerprint = self._tracks_fingerprint(tracks, self._colors)
@@ -773,6 +792,8 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
             if key == active:
                 self._apply_tracks_if_changed(
                     key, view, tracks, self._colors, fingerprint)
+                if key == _SEG_MAP:
+                    self._refresh_crs_card()
             elif self._views_applied.get(key) == fingerprint:
                 # 该视图已是最新数据：不标脏（若此前被标过则撤销），
                 # 切回时 flush 发现不脏 + 指纹一致，不会再重建
@@ -809,6 +830,8 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         if view is None:
             return
         self._apply_tracks_if_changed(key, view, tracks, colors)
+        if key == _SEG_MAP:
+            self._refresh_crs_card()
 
     def showEvent(self, e) -> None:
         """页面重新可见 → 补齐延后的视图重绘（避免长期停留在旧数据）。
@@ -824,9 +847,11 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
 
     def _refresh_crs_card(self) -> None:
         """投影信息卡：坐标系 / EPSG / 数据来源（按轨迹摘要汇总）。"""
-        summaries = self._map_view.track_summaries()
+        summaries = [info for info in self._map_view.track_summaries()
+                     if np.any(np.isfinite(info['xs']) & np.isfinite(info['ys']))]
+        self._crs_card.setVisible(bool(summaries))
         if not summaries:
-            self._crs_label.setText('暂无轨迹数据')
+            self._crs_label.clear()
             return
         lines = []
         for info in summaries:
@@ -846,6 +871,8 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         track = self._tracks_by_id.get(line_id)
         line = self._lines_by_id.get(line_id)
         labels = self._detail_labels
+        self._detail_card.setVisible(track is not None or line is not None)
+        self._sync_right_panel_visibility()
         if track is None and line is None:
             for label in labels.values():
                 label.setText('--')
@@ -873,6 +900,9 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
     def _refresh_coverage_statistics(self) -> None:
         """Update the frontend-only project coverage summary from all tracks."""
         statistics = coverage_statistics(self._tracks)
+        self._has_track_points = statistics['point_count'] > 0
+        self._coverage_card.setVisible(self._has_track_points)
+        self._sync_right_panel_visibility()
         labels = self._coverage_labels
         labels['tracks'].setText(f"{statistics['track_count']} 条")
         labels['points'].setText(f"{statistics['point_count']:,} 个")
@@ -883,6 +913,11 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
             labels['spacing'].setText(format_spacing(spacing))
         else:
             labels['spacing'].setText('--')
+
+    def _sync_right_panel_visibility(self) -> None:
+        self._right_panel.setVisible(self._spatial_results_btn.isChecked()
+                                     or not self._detail_card.isHidden()
+                                     or self._has_track_points)
 
     # ---------------- 槽
     def _on_line_check_changed(self, _item) -> None:
@@ -920,7 +955,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
 
     def _on_prefetch_clicked(self) -> None:
         if self._map_view.tracks_bbox_lonlat() is None:
-            self._prefetch_label.setText('当前测线缺少已配准轨迹')
+            self._prefetch_label.setText('地图上没有可定位的测线')
             return
         queued = self._map_view.prefetch_tracks()
         if queued > 0:

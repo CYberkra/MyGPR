@@ -14,10 +14,10 @@ from qfluentwidgets import isDarkTheme
 
 from ui import file_dialogs
 from ui.desktop_backend_facade import EventInterval, MarkerRecord, marker_rows_for_view
-from ui.widgets.context_menus import RoundMenu, make_menu, show_menu
+from ui.widgets.context_menus import RoundMenu, add_action, make_menu, show_menu
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action
 from ui.widgets.marker_editor import MarkerEditor
-from ui.widgets.marker_style import marker_style, section_title
+from ui.widgets.marker_style import marker_style
 
 
 class MarkerTableModel(QAbstractTableModel):
@@ -46,6 +46,8 @@ class MarkerTableModel(QAbstractTableModel):
             return None
         row = self.rows[index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
+            if index.column() == 3 and row['status'] == '可定位':
+                return ''
             return row[('name', 'purpose', 'position', 'status')[index.column()]]
         if role == Qt.ItemDataRole.UserRole:
             return row
@@ -78,7 +80,8 @@ class MarkerTableView(QTableView):
         self.horizontalHeader().setMinimumSectionSize(44)
         self.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(36)
+        self.verticalHeader().setDefaultSectionSize(30)
+        self.setMinimumHeight(0)
         self.setShowGrid(False)
         self.setWordWrap(False)
         self.setTextElideMode(Qt.TextElideMode.ElideRight)
@@ -101,7 +104,7 @@ class MarkerPanel(QWidget):
     close_requested = pyqtSignal()
     navigate = pyqtSignal(str, object)
 
-    def __init__(self, parent=None, *, allow_processing=False):
+    def __init__(self, parent=None, *, allow_processing=False, embedded=True):
         super().__init__(parent)
         self.setObjectName('markerListPanel')
         self.allow_processing = allow_processing
@@ -112,38 +115,34 @@ class MarkerPanel(QWidget):
         self._requests = {}
         self.editor = None
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
         header = QHBoxLayout()
-        header.addWidget(section_title('标记与区间', self))
-        header.addStretch()
-        close = QToolButton(self)
-        close.setText('×')
-        close.setAccessibleName('关闭标记列表')
-        close.setToolTip('关闭列表')
-        close.setFixedSize(28, 28)
-        close.clicked.connect(self.close_requested)
-        header.addWidget(close)
-        layout.addLayout(header)
         self.scope = QComboBox(self)
+        self.scope.setAccessibleName('标记范围')
         self.scope.addItems(['当前测线', '整个项目'])
-        layout.addWidget(self.scope)
+        header.addWidget(self.scope)
+        header.addStretch()
+        self.count_label = QLabel(self)
+        self.count_label.setObjectName('markerCount')
+        header.addWidget(self.count_label)
+        if embedded:
+            close = QToolButton(self)
+            close.setText('×')
+            close.setAccessibleName('关闭标记列表')
+            close.setToolTip('关闭列表')
+            close.setFixedSize(28, 28)
+            close.clicked.connect(self.close_requested)
+            header.addWidget(close)
+        layout.addLayout(header)
+        filters = QHBoxLayout()
         self.search = QLineEdit(self)
         self.search.setPlaceholderText('搜索名称或备注')
         self.search.setClearButtonEnabled(True)
-        layout.addWidget(self.search)
-        filters = QHBoxLayout()
-        self.kind = QComboBox(self)
-        self.kind.addItems(['点与区间', '点', '区间'])
-        self.purpose = QComboBox(self)
-        self.purpose.addItem('全部用途')
-        self.status = QComboBox(self)
-        self.status.addItems(['全部状态', '可定位', '已排除'])
-        for combo in (self.kind, self.purpose, self.status):
-            combo.setMinimumWidth(0)
-            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            filters.addWidget(combo)
-            combo.currentIndexChanged.connect(self._filter)
+        filters.addWidget(self.search, 1)
+        self.filter_btn = QPushButton('筛选 ▾', self)
+        self.filter_btn.clicked.connect(self._show_filters)
+        filters.addWidget(self.filter_btn)
         layout.addLayout(filters)
         self.model = MarkerTableModel(self)
         self.proxy = MarkerFilter(self)
@@ -163,7 +162,7 @@ class MarkerPanel(QWidget):
         self.new_interval.clicked.connect(self.make_interval)
         self.table.selectionModel().selectionChanged.connect(self._sync_interval_label)
         if allow_processing:
-            selection = QPushButton('选道处理 ▾', self)
+            selection = QPushButton('所选区间 ▾', self)
             selection.clicked.connect(lambda: self._show_selection_menu(selection))
             buttons.addWidget(selection)
         export = QPushButton('导出 ▾', self)
@@ -173,10 +172,9 @@ class MarkerPanel(QWidget):
         layout.addLayout(buttons)
         self.message = QLabel(self)
         self.message.setWordWrap(True)
+        self.message.setTextFormat(Qt.TextFormat.PlainText)
+        self.message.hide()
         layout.addWidget(self.message)
-        self.count_label = QLabel(self)
-        self.count_label.setObjectName('markerCount')
-        layout.addWidget(self.count_label)
         self.scope.currentIndexChanged.connect(self._scope)
         self.search.textChanged.connect(self._filter)
         self._shortcuts = []
@@ -209,12 +207,8 @@ class MarkerPanel(QWidget):
         selection = self.table.selectionModel()
         blocker = QSignalBlocker(selection)
         self.model.set_rows(rows)
-        value = self.purpose.currentText()
-        self.purpose.blockSignals(True)
-        self.purpose.clear()
-        self.purpose.addItems(['全部用途', *sorted({row['purpose'] for row in rows})])
-        self.purpose.setCurrentText(value)
-        self.purpose.blockSignals(False)
+        if self.proxy.purpose not in {row['purpose'] for row in rows}:
+            self.proxy.purpose = ''
         self._filter()
         for index, row in enumerate(self.model.rows):
             mapped = self.proxy.mapFromSource(self.model.index(index, 0))
@@ -224,16 +218,39 @@ class MarkerPanel(QWidget):
                 selection.setCurrentIndex(mapped, QItemSelectionModel.SelectionFlag.NoUpdate)
         del blocker
         self._sync_interval_label()
-        self.message.clear()
+        self._set_message('')
 
     def _filter(self, *_):
         self.proxy.query = self.search.text().strip().casefold()
-        self.proxy.kind = self.kind.currentText() if self.kind.currentIndex() else ''
-        self.proxy.purpose = self.purpose.currentText() if self.purpose.currentIndex() > 0 else ''
-        self.proxy.status = self.status.currentText() if self.status.currentIndex() else ''
+        active = sum(bool(value) for value in (self.proxy.kind, self.proxy.purpose, self.proxy.status))
+        self.filter_btn.setText(f'筛选 {active} ▾' if active else '筛选 ▾')
         self.proxy.invalidateFilter()
         visible, total = self.proxy.rowCount(), self.model.rowCount()
         self.count_label.setText(f'{total} 条记录' if visible == total else f'{visible} / {total} 条记录')
+
+    def _show_filters(self):
+        menu = make_menu(self)
+        purposes = sorted({row['purpose'] for row in self.model.rows if row['purpose']})
+        for field, label, default, values in (
+                ('kind', '类型', '点与区间', ('点', '区间')),
+                ('purpose', '用途', '全部用途', purposes),
+                ('status', '状态', '全部状态', ('可定位', '已排除'))):
+            submenu = RoundMenu(label, menu)
+            for value in ('', *values):
+                action = add_action(submenu, None, value or default,
+                                    lambda _checked=False, field=field, value=value: self._set_filter(field, value))
+                action.setCheckable(True)
+                action.setChecked(getattr(self.proxy, field) == value)
+            menu.addMenu(submenu)
+        show_menu(menu, self.filter_btn.mapToGlobal(self.filter_btn.rect().bottomLeft()))
+
+    def _set_filter(self, field, value):
+        setattr(self.proxy, field, value)
+        self._filter()
+
+    def _set_message(self, text):
+        self.message.setText(text)
+        self.message.setVisible(bool(text))
 
     def _scope(self):
         if not self.view:
@@ -296,7 +313,7 @@ class MarkerPanel(QWidget):
         target = self.view
         if len(points) == 2:
             if len({row['line_id'] for row in rows}) != 1:
-                self.message.setText('两个边界标记须属于同一测线')
+                self._set_message('两个边界标记须属于同一测线')
                 return
             target = self._views.get(rows[0]['line_id'], self.view)
         record = EventInterval()
@@ -304,7 +321,7 @@ class MarkerPanel(QWidget):
             points.sort(key=lambda point: point.anchor.trace)
             a, b = points
             if a.anchor.source_id != b.anchor.source_id:
-                self.message.setText('两个边界标记须属于同一数据版本')
+                self._set_message('两个边界标记须属于同一数据版本')
                 return
             record = replace(record, start=a.anchor, end=b.anchor,
                              start_marker_id=a.uid, end_marker_id=b.uid,
@@ -353,7 +370,7 @@ class MarkerPanel(QWidget):
         menu = make_menu(self)
         view, rows = self.view, tuple(self._selected_rows())
         reason = self._selection_reason(view, rows)
-        for title, mode in [('保留所选区间…', 'keep'), ('剔除所选区间…', 'exclude')]:
+        for title, mode in [('保留…', 'keep'), ('剔除…', 'exclude')]:
             object_action(menu, mode, title,
                 lambda _checked=False, mode=mode: self.preview(mode, rows) if view is self.view else None,
                 enabled=not reason, reason=reason)
@@ -371,8 +388,9 @@ class MarkerPanel(QWidget):
             return '请选择事件区间'
         if any(row['line_id'] != view.document.line_id or row['target_id'] != view.target_id for row in rows):
             return '请选择当前输入的区间'
-        if any(row['record'].review_state == 'needs_review' for row in rows):
-            return '边界已变更，区间需复核'
+        for row in rows:
+            if not row['record'].excluded and (issue := row.get('boundary_issue')):
+                return f'“{row["name"]}”的{issue}，请编辑区间并保存起止范围'
         if any(not row['record'].closed or row['record'].excluded or not row['projection'].spans for row in rows):
             return '选择中有开放、已排除或无法映射到道的区间'
         return ''
@@ -413,7 +431,7 @@ class MarkerPanel(QWidget):
         rows = self._selected_rows() if rows is None else rows
         reason = self._selection_reason(self.view, rows)
         if reason:
-            self.message.setText(reason)
+            self._set_message(reason)
             return
         self.request('preview', {'view': self.view, 'ids': [row['uid'] for row in rows], 'mode': mode})
 
@@ -441,7 +459,7 @@ class MarkerPanel(QWidget):
         if action == 'preview' and payload['view'] is not self.view:
             return
         if error:
-            self.message.setText(error)
+            self._set_message(error)
             if action == 'save' and self.editor:
                 self.editor.failed(error)
             return
@@ -472,17 +490,29 @@ class MarkerPanel(QWidget):
             self._views = {view.document.line_id: view for view in result}
             self._populate(tuple(row for view in result for row in view.rows))
         elif action == 'preview':
-            text = (f"输入：{result['input_artifact_id'] or '原始数据'}\n"
-                    f"合并后选中 {result['affected_count']} 道；输入 {result['input_count']} 道；输出 {result['output_count']} 道\n"
-                    f"输出分段 {len(result['output_segments'])} 段\n"
-                    + '\n'.join(f'道 {a + 1}–{b}' for a, b in result['ranges']))
-            box = QMessageBox(QMessageBox.Icon.Question, '确认道范围处理', text,
+            title = '保留所选区间' if result['mode'] == 'keep' else '剔除所选区间'
+            ranges = '、'.join(str(a + 1) if a + 1 == b else f'{a + 1}–{b}'
+                              for a, b in result['ranges'])
+            segments = len(result['output_segments'])
+            input_name = result['input_artifact_id'] or '原始数据'
+            text = (f"{result['line_id']} · {input_name}\n"
+                    f"选中 {result['affected_count']} / {result['input_count']} 道\n"
+                    f"输出 {result['output_count']} 道")
+            if segments > 1:
+                text += f' · {segments} 段'
+            box = QMessageBox(QMessageBox.Icon.Question, title, text,
                               QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel, self)
-            box.button(QMessageBox.StandardButton.Ok).setText('运行并生成新成果')
+            box.setTextFormat(Qt.TextFormat.PlainText)
+            if len(ranges) <= 100:
+                box.setInformativeText(f'道号 {ranges}')
+            else:
+                box.setDetailedText('\n'.join(f'道号 {a + 1}–{b}' for a, b in result['ranges']))
+            box.button(QMessageBox.StandardButton.Ok).setText('生成成果')
             box.button(QMessageBox.StandardButton.Cancel).setText('取消')
+            box.setDefaultButton(QMessageBox.StandardButton.Cancel)
             if box.exec() == QMessageBox.StandardButton.Ok and payload['view'] is self.view:
                 self.request('execute', {'preview': result})
         elif action == 'execute':
-            self.message.setText('已提交任务：' + str(result))
+            self._set_message('已提交任务')
         elif action == 'export':
-            self.message.setText(str(result))
+            self._set_message(str(result))

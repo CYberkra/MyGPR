@@ -284,7 +284,7 @@ class ProcessingSteps:
         groups = {}
         for aid, art in self._artifacts_by_id.items():
             meta = artifact_parameters(art)
-            group = str(meta.get('run_group_id') or '历史成果 · 来源待核对')
+            group = str(meta.get('run_group_id') or '历史成果 · 无运行记录')
             groups.setdefault(group, []).append((aid, art))
         for group, members in groups.items():
             parent = QTreeWidgetItem([group[:12]])

@@ -162,7 +162,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         empty = QVBoxLayout(self._empty_project)
         empty.setSpacing(constants.SPACE_3)
         empty.addStretch(1)
-        empty_label = BodyLabel('项目已就绪，导入第一条测线', self._empty_project)
+        empty_label = BodyLabel('暂无测线', self._empty_project)
         empty_label.setObjectName('projectEmptyLabel')
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty.addWidget(empty_label)
@@ -175,8 +175,10 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         self._ledger_widget.setLayout(self._build_right_column())
         self._work_stack.addWidget(self._ledger_widget)
         self._import_dialog = self._tool_dialog('导入测线', self._build_import_card)
+        self._import_dialog.resize(620, 415)
         self._sync_dialog = self._tool_dialog('传感器同步', self._build_sync_card)
-        self._sync_dialog.setMinimumWidth(680)
+        self._sync_dialog.setMinimumWidth(560)
+        self._sync_dialog.resize(640, 375)
         self._info_dialog = self._tool_dialog('项目设置', self._build_info_card)
         self._quality_dialog = QualityCenterDialog(self)
         self._quality_dialog.check_project_requested.connect(
@@ -266,7 +268,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
 
     def _build_import_card(self, parent) -> CardWidget:
         """卡片2"导入测线"：文件+浏览 / 测线号(默认 L01) / 名称 / 介电常数(1-81, 默认 9.0) / 预检+导入 / 预检结果区。"""
-        card, layout = make_card('导入测线')
+        card, layout = make_card()
 
         # 数据文件行
         self.file_edit = LineEdit(card)
@@ -298,25 +300,28 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         layout.addLayout(make_form_row('介电常数:', self.dielectric_spin,
                                        parent=card))
 
-        axis_hint = make_hint('纯矩阵不含物理轴；请按采集记录填写参数。', parent=card)
-        axis_hint.setWordWrap(True)
-        layout.addWidget(axis_hint)
-        self._matrix_axes_check = CheckBox('为纯矩阵输入采集轴参数（单文件）', card)
+        self._matrix_axes_check = CheckBox('手动填写时窗和道间距', card)
+        self._matrix_axes_check.setToolTip('用于单个缺少采集参数的矩阵文件')
         layout.addWidget(self._matrix_axes_check)
-        self._matrix_time_window = DoubleSpinBox(card)
+        matrix_axes = QWidget(card)
+        matrix_layout = QVBoxLayout(matrix_axes)
+        matrix_layout.setContentsMargins(0, 0, 0, 0)
+        matrix_layout.setSpacing(constants.SPACE_2)
+        self._matrix_time_window = DoubleSpinBox(matrix_axes)
         self._matrix_time_window.setRange(0.000001, 1000000000.0)
         self._matrix_time_window.setDecimals(6)
         self._matrix_time_window.setValue(250.0)
-        self._matrix_time_window.setToolTip('首末采样点的时间跨度，按包含末点的线性时间轴生成。')
-        self._matrix_trace_interval = DoubleSpinBox(card)
+        self._matrix_time_window.setToolTip('首末采样点的时间差')
+        self._matrix_trace_interval = DoubleSpinBox(matrix_axes)
         self._matrix_trace_interval.setRange(0.000001, 10000000.0)
         self._matrix_trace_interval.setDecimals(6)
         self._matrix_trace_interval.setValue(1.0)
-        for label, widget in (('首末采样跨度/ns:', self._matrix_time_window),
-                              ('道间距/m:', self._matrix_trace_interval)):
-            widget.setEnabled(False)
-            self._matrix_axes_check.toggled.connect(widget.setEnabled)
-            layout.addLayout(make_form_row(label, widget, parent=card))
+        for label, widget in (('采集时窗（ns）', self._matrix_time_window),
+                              ('道间距（m）', self._matrix_trace_interval)):
+            matrix_layout.addLayout(make_form_row(label, widget, parent=matrix_axes))
+        matrix_axes.hide()
+        self._matrix_axes_check.toggled.connect(matrix_axes.setVisible)
+        layout.addWidget(matrix_axes)
 
         # 按钮行：预检 + 导入
         btn_row = QHBoxLayout()
@@ -331,16 +336,16 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         btn_row.addWidget(self.import_btn)
         layout.addLayout(btn_row)
 
-        # 预检结果 CaptionLabel 区
-        layout.addWidget(make_separator())
-        self._preflight_label = make_hint('预检结果将显示在此处', parent=card)
+        # 预检结果
+        self._preflight_label = make_hint('', parent=card)
         self._preflight_label.setWordWrap(True)
         self._preflight_label.setMinimumHeight(34)
         layout.addWidget(self._preflight_label)
+        self._preflight_label.hide()
         return card
 
     def _build_sync_card(self, parent) -> CardWidget:
-        card, layout = make_card('传感器同步')
+        card, layout = make_card(parent=parent)
         from ui.pages.sensor_sync_form import SensorSyncForm
         self._sync_form = SensorSyncForm(card)
         self._sensor_edits = self._sync_form.edits
@@ -349,11 +354,12 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         self._sync_form.apply_template_requested.connect(self._apply_sensor_template)
         layout.addWidget(self._sync_form)
         btn_row = QHBoxLayout()
-        self.sync_btn = PrimaryPushButton('提交同步', card)
+        self.sync_btn = PrimaryPushButton('开始同步', card)
         self.sync_btn.clicked.connect(self._emit_sync_request)
         btn_row.addStretch(1)
         btn_row.addWidget(self.sync_btn)
         layout.addLayout(btn_row)
+        layout.addStretch(1)
         return card
 
     def _add_labeled_edit(self, layout, card, label_text, *, default='',
@@ -391,6 +397,8 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
             QTableWidget.SelectionMode.ExtendedSelection)
         header = self._lines_table.horizontalHeader()
         header.sectionResized.connect(self._save_lines_column_widths)
+        header.geometriesChanged.connect(self._sync_detail_metrics)
+        self._lines_table.horizontalScrollBar().valueChanged.connect(self._sync_detail_metrics)
         self._lines_table.setMinimumHeight(120)
         self._lines_table.itemSelectionChanged.connect(
             self._on_line_selection_changed)
@@ -409,7 +417,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         detail_layout.setSpacing(constants.PANEL_SPACING)
         detail_header = QHBoxLayout()
         detail_header.setSpacing(constants.SPACE_2)
-        self._selected_heading = BodyLabel('选择一条测线以查看详情', detail)
+        self._selected_heading = BodyLabel('选择一条测线', detail)
         self._selected_heading.setWordWrap(True)
         self._selected_heading.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         detail_header.addWidget(self._selected_heading, 1)
@@ -452,7 +460,8 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         self._artifacts_table = QTableWidget(0, 6, art_card)
         configure_ledger_table(self._artifacts_table, artifacts=True)
         self._artifacts_table.setHorizontalHeaderLabels(
-            ['名称', '方法', '形状', '创建时间', 'SHA前8位', '操作'])
+            ['名称', '方法', '采样点 × 道数', '创建时间', '校验值', '操作'])
+        self._artifacts_table.setColumnHidden(4, True)
         self._artifacts_table.setEditTriggers(
             QTableWidget.EditTrigger.NoEditTriggers)
         self._artifacts_table.setSelectionBehavior(
@@ -535,6 +544,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
             self._matrix_axes_check.setChecked(False)
             self._resume_lines.clear()
             self.file_edit.clear()
+            self.set_preflight_result('', True)
             self.line_name_edit.clear()
             self.line_id_edit.setText('L01')
             self._suggested_line_id = 'L01'
@@ -628,7 +638,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         self._artifacts_table.setRowCount(0)
         if not self._artifacts:
             self._artifacts_table.insertRow(0)
-            placeholder = QTableWidgetItem('暂无成果，处理完成后在此显示')
+            placeholder = QTableWidgetItem('暂无处理成果')
             placeholder.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             placeholder.setFlags(Qt.ItemFlag.NoItemFlags)
             placeholder.setForeground(QBrush(QColor(status_color('disabled'))))
@@ -661,7 +671,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
             self._artifacts_table.setCellWidget(row, 5, del_btn)
             for col, text in enumerate(values):
                 item = QTableWidgetItem(text)
-                item.setToolTip(presentation.tooltip)
+                item.setToolTip(presentation.tooltip + (f'\nSHA-256：{sha}' if sha else ''))
                 self._artifacts_table.setItem(row, col, item)
         self._restore_column_widths(self._artifacts_table, 'artifacts')
         self._style_ledger_items()
@@ -670,6 +680,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
     def set_preflight_result(self, text: str, ok: bool) -> None:
         """预检结果区：ok 绿色 / 失败红色。"""
         self._preflight_label.setText(str(text or ''))
+        self._preflight_label.setVisible(bool(text))
         self._preflight_label.set_hint_key('success' if ok else 'error')
 
     def finish_import(self, submitted_source: str, failed_sources=()) -> None:
@@ -760,9 +771,9 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         selected = next((line for line in self._lines
                          if str(getattr(line, 'line_id', '') or '') == self._current_line_id), None)
         if selected is None:
-            hint = f'已选 {len(rows)} 条测线 · 可从更多菜单批量删除' if len(rows) > 1 else '选择一条测线以查看详情'
+            hint = f'已选 {len(rows)} 条测线' if len(rows) > 1 else '选择一条测线'
             self._selected_heading.setText(hint)
-            self._line_detail.set_message(hint)
+            self._line_detail.set_message('')
             self._sensor_detail.set_message('请先选择一条测线。')
         else:
             lid = self._current_line_id
@@ -770,12 +781,25 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
             quality = str(getattr(selected, 'data_quality', '') or '尚未检查')
             self._line_detail.set_line(
                 lid, getattr(selected, 'sample_count', 0), getattr(selected, 'trace_count', 0),
-                quality, self._source_path_cache.get(lid), source_ready=lid in self._source_path_cache)
+                quality, self._source_path_cache.get(lid), source_ready=lid in self._source_path_cache,
+                show_metrics=self._line_metrics_need_detail())
             self._sensor_detail.set_summary(lid, self._sensor_summary_cache.get(lid))
         self._sensor_detail.set_sync_result(self._sensor_sync_results.get(self._current_line_id))
         if getattr(self, '_last_workspace_state', None) != state:
             self._last_workspace_state = state
             self.workspace_state_changed.emit(state)
+
+    def _line_metrics_need_detail(self) -> bool:
+        header = self._lines_table.horizontalHeader()
+        return any(header.isSectionHidden(column)
+                   or header.sectionViewportPosition(column) < 0
+                   or header.sectionViewportPosition(column) + header.sectionSize(column) > header.width()
+                   for column in (0, 2, 3, 5))
+
+    def _sync_detail_metrics(self):
+        detail = getattr(self, '_line_detail', None)
+        if detail is not None and self._current_line_id:
+            detail.show_metrics(self._line_metrics_need_detail())
 
     def _can_write(self) -> bool:
         return (self._has_project() and not self._busy
@@ -796,7 +820,8 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
             self.line_id_edit.setEnabled(len(paths) == 1)
             self.line_name_edit.setEnabled(len(paths) == 1)
             clear_invalid(self.file_edit)
-            self._preflight_label.setText('预检结果将显示在此处')
+            self._preflight_label.clear()
+            self._preflight_label.hide()
             self._preflight_label.set_hint_key('info')
 
     def _on_import_text_edited(self, text):
@@ -805,7 +830,8 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
         self.file_edit.setToolTip(text)
         self.line_id_edit.setEnabled(True)
         self.line_name_edit.setEnabled(True)
-        self._preflight_label.setText('预检结果将显示在此处')
+        self._preflight_label.clear()
+        self._preflight_label.hide()
         self._preflight_label.set_hint_key('info')
 
     def _suggest_line_id(self) -> str:
@@ -860,6 +886,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, QWidget):
             payload['trace_interval_m'] = float(self._matrix_trace_interval.value())
         if preflight:
             self._preflight_label.setText('预检中…')
+            self._preflight_label.show()
             self._preflight_label.set_hint_key('info')
         self.import_requested.emit(payload)
 

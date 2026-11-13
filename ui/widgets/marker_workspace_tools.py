@@ -120,7 +120,7 @@ class MarkerWorkspaceTools(QObject):
 
     def menu(self, view, position):
         menu = make_menu(self.host)
-        visibility = add_action(menu, None, '显示标记条', view.set_acquisition_markers_visible)
+        visibility = add_action(menu, None, '显示图上标记', view.set_acquisition_markers_visible)
         visibility.setCheckable(True)
         visibility.setChecked(view._acquisition_markers_visible)
         add_action(menu, None, '打开标记列表', lambda: self.show_panel(view))
@@ -200,7 +200,7 @@ class MarkerWorkspaceTools(QObject):
         # A manual boundary adjustment replaces the point references explicitly.
         record = replace(previous, start=current.anchor(start), end=current.anchor(end),
                          start_marker_id='', end_marker_id='', start_marker_revision=0, end_marker_revision=0,
-                         time_start='', time_end='', review_state='unreviewed')
+                         time_start='', time_end='')
         self.show_panel().edit(record, current)
 
     def deliver(self, token, result, error):

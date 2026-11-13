@@ -210,7 +210,7 @@ class BScanViewInteractionMixin:
         for build in getattr(self, '_canvas_menu_sections', ()):
             build(menu, scene_pos)
         menu.addSeparator()
-        add_action(menu, FIF.SETTING, '当前图显示…', lambda: self.show_display_menu(position))
+        add_action(menu, FIF.SETTING, '当前视图显示设置…', lambda: self.show_display_menu(position))
         add_action(menu, FIF.COPY, '复制图像', self._copy_image,
                    enabled=self._image_shape is not None)
         add_action(menu, FIF.SAVE, '导出图件…', self.export_figure,
@@ -240,7 +240,8 @@ class BScanViewInteractionMixin:
         if matrix is None:
             return
         include = True
-        if self.marker_strip.isVisible() or self._marker_pins.isVisible() or self._event_guides:
+        if (self.marker_strip.isVisible() or self._marker_pins.isVisible()
+                or any(guide.isVisible() for guide in self._event_guides)):
             option, accepted = QInputDialog.getItem(self, '导出图件', '标记显示',
                 ['包含可见标记', '仅图像'], editable=False)
             if not accepted:

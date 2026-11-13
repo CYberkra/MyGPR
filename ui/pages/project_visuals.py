@@ -7,9 +7,10 @@ import ntpath
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QBrush, QColor, QFont
 from PyQt6.QtWidgets import (
-    QFrame, QHeaderView, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
+    QApplication, QFrame, QHeaderView, QHBoxLayout, QLabel, QScrollArea, QSizePolicy,
     QTableWidget, QVBoxLayout, QWidget,
 )
+from qfluentwidgets import TransparentPushButton
 
 from ui import constants
 from ui.design_tokens import color, radius
@@ -18,7 +19,7 @@ from ui.theme_helpers import ui_font
 
 
 class LineDetailsPanel(QWidget):
-    """Compact selected-line metadata; paths remain exact, selectable plain text."""
+    """Selected-line metadata with an explicit path-copy action."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,10 +58,14 @@ class LineDetailsPanel(QWidget):
         source_column.setSpacing(constants.SPACE_1)
         self._source_caption = self._label('数据来源', self._source)
         self._source_name = self._label('', self._source, selectable=True)
-        self._source_path = self._label('', self._source, selectable=True)
+        self._source_path = ''
+        self._copy_path = TransparentPushButton('复制路径', self._source)
+        self._copy_path.clicked.connect(lambda: QApplication.clipboard().setText(self._source_path))
+        source_row = QHBoxLayout()
+        source_row.addWidget(self._source_name, 1)
+        source_row.addWidget(self._copy_path)
         source_column.addWidget(self._source_caption)
-        source_column.addWidget(self._source_name)
-        source_column.addWidget(self._source_path)
+        source_column.addLayout(source_row)
         column.addWidget(self._source)
         self.set_message('选择一条测线')
 
@@ -78,28 +83,33 @@ class LineDetailsPanel(QWidget):
 
     def set_message(self, text: str) -> None:
         self._message.setText(text)
-        self._message.show()
+        self._message.setVisible(bool(text))
         for value in self._values:
             value.clear()
         self._source_name.clear()
-        self._source_path.clear()
-        self._source_path.setToolTip('')
+        self._source_path = ''
+        self._source_name.setToolTip('')
         for widget in (self._metrics, self._separator, self._source):
             widget.hide()
 
-    def set_line(self, line_id, samples, traces, quality, source, *, source_ready: bool) -> None:
+    def set_line(self, line_id, samples, traces, quality, source, *, source_ready: bool,
+                 show_metrics: bool = True) -> None:
         self._message.hide()
-        for widget in (self._metrics, self._separator, self._source):
-            widget.show()
+        self._source.show()
+        self.show_metrics(show_metrics)
         for label, value in zip(self._values, (line_id, samples, traces, quality)):
             label.setText(str(value))
         path = str(source or '')
         self._source_name.setText(
             ntpath.basename(path) if path else
             ('未记录数据来源' if source_ready else '正在查询数据来源…'))
-        self._source_path.setText(path)
-        self._source_path.setToolTip(path)
-        self._source_path.setVisible(bool(path))
+        self._source_path = path
+        self._source_name.setToolTip(path)
+        self._copy_path.setVisible(bool(path))
+
+    def show_metrics(self, visible: bool) -> None:
+        self._metrics.setVisible(visible and not self._source.isHidden())
+        self._separator.setVisible(visible and not self._source.isHidden())
 
     def apply_theme(self, dark: bool) -> None:
         for label in (*self._captions, self._source_caption, self._message):
@@ -111,9 +121,6 @@ class LineDetailsPanel(QWidget):
         self._source_name.setFont(ui_font(constants.FONT_SIZE_BODY, QFont.Weight.DemiBold))
         self._source_name.setStyleSheet(
             f'color: {color("text_primary", dark)}; background: transparent;')
-        self._source_path.setFont(ui_font(constants.FONT_SIZE_SECONDARY))
-        self._source_path.setStyleSheet(
-            f'color: {color("text_secondary", dark)}; background: transparent;')
         self._separator.setStyleSheet(f'background: {color("border_default", dark)};')
 
 

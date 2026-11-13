@@ -136,6 +136,10 @@ class MarkerEditor(QDialog):
         self.end_ref = self._reference(record.end_marker_id)
         form.addRow('起始标记', self.start_ref)
         form.addRow('结束标记', self.end_ref)
+        self.start_ref.currentIndexChanged.connect(lambda: self._sync_boundary(self.start_ref, self.start))
+        self.end_ref.currentIndexChanged.connect(lambda: self._sync_boundary(self.end_ref, self.end))
+        self._sync_boundary(self.start_ref, self.start)
+        self._sync_boundary(self.end_ref, self.end)
         self.inc_start = QCheckBox('包含起始道', body)
         self.inc_end = QCheckBox('包含结束道', body)
         self.inc_start.setChecked(record.include_start)
@@ -152,9 +156,6 @@ class MarkerEditor(QDialog):
         self.time_end = QLineEdit(local_time(record.time_end), body)
         for field in (self.time_start, self.time_end):
             field.setPlaceholderText('ISO 8601，含时区；可留空')
-        self.review = QCheckBox('已复核当前边界', body)
-        self.review.setChecked(record.review_state == 'reviewed')
-        form.addRow(self.review)
         self.range_preview = QLabel(body)
         self.range_preview.setObjectName('markerRangePreview')
         self.range_preview.setWordWrap(True)
@@ -197,13 +198,25 @@ class MarkerEditor(QDialog):
         combo = QComboBox(self)
         combo.addItem('直接输入边界', '')
         for marker in self.view.document.markers:
-            if not marker.excluded:
-                combo.addItem(f'{marker.name or marker.uid[:8]} · {marker.uid[:8]}', marker.uid)
-        combo.setCurrentIndex(max(0, combo.findData(selected)))
+            if marker.excluded and marker.uid != selected:
+                continue
+            position = ('已排除' if marker.excluded else
+                        f'第 {marker.anchor.trace + 1} 道' if marker.anchor else '缺少道号')
+            combo.addItem(f'{marker.name or marker.uid[:8]} · {position} · {marker.uid[:8]}', marker.uid)
+        if selected and combo.findData(selected) < 0:
+            combo.addItem(f'标记不存在 · {selected[:8]}', selected)
+        combo.setCurrentIndex(combo.findData(selected))
         return combo
 
     def _anchor(self, widget):
         return MarkerAnchor(self.source.currentData(), widget.value() - 1) if widget.value() else None
+
+    def _sync_boundary(self, combo, spin):
+        uid = combo.currentData()
+        spin.setEnabled(not uid)
+        mark = self.view.markers_by_id.get(uid)
+        if mark and mark.anchor and not mark.excluded:
+            spin.setValue(mark.anchor.trace + 1)
 
     def _draft(self):
         changes = dict(name=self.name.text().strip(), purpose=self.purpose.currentText().strip() or '其他',
@@ -214,12 +227,13 @@ class MarkerEditor(QDialog):
             changes.update(start=self._anchor(self.start), end=self._anchor(self.end),
                 include_start=self.inc_start.isChecked(), include_end=self.inc_end.isChecked(),
                 time_start=self.time_start.text().strip(), time_end=self.time_end.text().strip(),
-                time_source_id=self.source.currentData(),
-                review_state='reviewed' if self.review.isChecked() else 'unreviewed')
-            markers = {item.uid: item for item in self.view.document.markers}
-            for side in ('start', 'end'):
+                time_source_id=self.source.currentData())
+            markers = self.view.markers_by_id
+            for side, label in (('start', '起始'), ('end', '结束')):
                 uid = getattr(self, f'{side}_ref').currentData()
                 mark = markers.get(uid)
+                if uid and (mark is None or mark.excluded or mark.anchor is None):
+                    raise ValueError(f'请选择可用的{label}标记或直接输入边界')
                 changes[f'{side}_marker_id'] = uid
                 changes[f'{side}_marker_revision'] = mark.revision if mark else 0
                 if mark:
@@ -254,7 +268,7 @@ class MarkerEditor(QDialog):
             if not isinstance(record, EventInterval) or not record.closed:
                 self.range_preview.setText('未闭合区间，可保存记录')
                 return
-            indices = self.view.indices(replace(record, excluded=False, review_state='unreviewed'))
+            indices = self.view.indices(replace(record, excluded=False))
             text = (f'实际首道 {indices[0] + 1} · 末道 {indices[-1] + 1} · {len(indices)} 道'
                     if len(indices) else '期间无采集道或不在当前结果')
             self.range_preview.setText(text)

@@ -62,10 +62,12 @@ class BScanMarkerEventsMixin:
             region = pg.LinearRegionItem((a, b), movable=False, brush=shade, pen=pg.mkPen(ink))
             region.setZValue(12)
             self._plot.addItem(region, ignoreBounds=True)
+            region.setVisible(self._acquisition_markers_visible)
             self._event_guides.append(region)
         for point in projection.positions:
             guide = pg.InfiniteLine(self.marker_strip.display_x(point), angle=90, movable=False, pen=pg.mkPen(ink, width=2))
             self._plot.addItem(guide, ignoreBounds=True)
+            guide.setVisible(self._acquisition_markers_visible)
             self._event_guides.append(guide)
         points = projection.positions or tuple(a for a, _ in projection.spans)
         if locate and points:

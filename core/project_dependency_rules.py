@@ -84,7 +84,7 @@ def resolve_event_impact(event: ProjectEvent) -> DependencyImpact:
         )
 
     if et == ProjectEventType.BSCAN_ORIENTATION_FIXED:
-        msg = reason or f"{line}B-scan 方向已修正，相关处理/目标需复核"
+        msg = reason or f"{line}B-scan 方向已修正，空间成果与报告基于旧方向"
         return DependencyImpact(
             dirty_modules={"processing", "targets", "spatial", "report"},
             affected_modules={"project", "processing", "targets", "spatial", "report"},

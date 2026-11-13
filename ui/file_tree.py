@@ -250,7 +250,7 @@ def build_lineage_model(artifacts: Sequence[Any], line_id: str) -> tuple[TreeNod
     nodes = [raw]
     if unknown:
         nodes.append(TreeNode(key=f'unknown:{line_id}', kind='group',
-                    text='历史成果 · 来源待核对',
+                    text='历史成果 · 缺少来源记录',
                     tooltip='缺少可靠的直接来源记录；可以查看或继续处理，不能推定历史父子关系',
                     children=tuple(built[a] for a in sorted(unknown, key=order))))
     return tuple(nodes)

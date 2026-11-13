@@ -164,6 +164,36 @@ def test_refresh_preserves_selected_identity_and_updated_guides(qapp):
     view.close()
 
 
+def test_hidden_markers_keep_guides_hidden_after_selection_and_refresh(qapp):
+    context = marker_view(1)
+    event = EventInterval(start=context.anchor(2), end=context.anchor(6))
+    document = replace(context.document, intervals=(event,))
+    segments = np.repeat([0, 1], 10)
+    context = replace(context, document=document, trace_metadata={'_marker_segment': segments})
+    context = replace(context, rows=project_rows(context))
+    view = BScanView()
+    view.set_bundle(replace(make_preview_bundle(np.ones((12, 20), np.float32)), marker_view=context))
+    view.show()
+    view.select_event_marker(event.uid)
+    assert view._event_guides[0].isVisible()
+
+    view.set_acquisition_markers_visible(False)
+    assert view.marker_strip.isHidden()
+    assert not view._event_guides[0].isVisible()
+    assert view._gap_guides[0].isVisible()
+    view.select_event_marker('m0')
+    assert not view._event_guides[0].isVisible()
+    view.select_event_marker(event.uid)
+    view.set_marker_view(context)
+    assert not view._event_guides[0].isVisible()
+
+    view.set_acquisition_markers_visible(True)
+    assert view.marker_strip.isVisible()
+    assert view.marker_strip.selected_id == event.uid
+    assert view._event_guides[0].isVisible()
+    view.close()
+
+
 def test_project_list_refresh_uses_saved_revision_for_next_preview(qapp):
     context = marker_view(2)
     event = EventInterval(start=context.anchor(0), end=context.anchor(1))

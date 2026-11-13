@@ -5,9 +5,8 @@ import pytest
 
 pytest.importorskip('PyQt6')
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPalette
-from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from ui.design_tokens import color
 from ui.pages.project_page import ProjectPage
@@ -55,10 +54,9 @@ def test_details_preserve_quality_and_complete_copyable_source(qapp):
     panel = page._line_detail
     assert [label.text() for label in panel._values] == ['L01', '501', '709', '★★★★★']
     assert panel._source_name.text() == 'lineData_streaming.csv'
-    assert panel._source_path.text() == source
-    assert panel._source_path.toolTip() == source
-    assert panel._source_path.textFormat() == Qt.TextFormat.PlainText
-    assert panel._source_path.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse
+    assert panel._source_name.toolTip() == source
+    panel._copy_path.click()
+    assert QApplication.clipboard().text() == source
     page.close()
 
 
@@ -70,7 +68,7 @@ def test_selection_and_project_changes_clear_detail_source(qapp):
     page.set_line_source_path('L01', 'C:\\data\\old.csv')
     page.set_project_info(SimpleNamespace(project_id='other', read_only=False))
     page.set_lines([])
-    assert page._line_detail._source_path.text() == ''
+    assert page._line_detail._source_name.toolTip() == ''
     assert page._line_detail._source_name.text() == ''
     page.close()
 
@@ -87,14 +85,15 @@ def test_detail_theme_and_short_pane_keep_source_reachable(qapp, dark):
     qapp.processEvents()
     # Restrict the actual details viewport, as when the ledger splitter is dragged.
     scroll.setFixedSize(440, 100)
+    panel.show_metrics(True)
     qapp.processEvents()
     assert color('text_primary', dark) in panel._values[0].styleSheet()
-    assert color('text_secondary', dark) in panel._source_path.styleSheet()
+    assert color('text_primary', dark) in panel._source_name.styleSheet()
     assert not scroll.widget().autoFillBackground()
     assert not scroll.viewport().autoFillBackground()
     assert scroll.verticalScrollBar().maximum() > 0
     assert scroll.horizontalScrollBar().maximum() == 0
-    scroll.ensureWidgetVisible(panel._source_path)
+    scroll.ensureWidgetVisible(panel._copy_path)
     qapp.processEvents()
     assert scroll.verticalScrollBar().value() > 0
     page.close()

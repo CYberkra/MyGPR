@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from functools import cached_property
 
 import numpy as np
 
@@ -9,7 +10,7 @@ from mygpr.domain.markers.mapping import (
     MarkerProjection, SEGMENT_KEY, add_source_mapping, index_spans, project_anchor, read_mapping,
 )
 from mygpr.domain.markers.models import EventInterval, MarkerAnchor, MarkerDocument, MarkerRecord
-from mygpr.domain.markers.operations import put_record, remove_record
+from mygpr.domain.markers.operations import interval_boundary_issue, put_record, remove_record
 from mygpr.domain.markers.ranges import interval_bounds, interval_indices, selection_indices
 
 
@@ -24,7 +25,7 @@ def metadata_value(metadata, key, default=None):
 
 STATUS_LABELS = {'exact': '可定位', 'interpolated': '插值定位', 'outside': '不在当前结果',
                  'unmapped': '无法定位', 'open': '未闭合', 'empty': '期间无采集道',
-                 'needs_review': '需复核', 'excluded': '已排除'}
+                 'excluded': '已排除'}
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,13 @@ class MarkerView:
     def mapping(self, source_id):
         return read_mapping(self.header, self.trace_metadata, source_id, self.target_id, self.count)
 
+    @cached_property
+    def markers_by_id(self):
+        return {marker.uid: marker for marker in self.document.markers}
+
     def indices(self, interval):
+        if not interval.excluded and (issue := interval_boundary_issue(interval, self.markers_by_id)):
+            raise ValueError(f'{issue}，请编辑区间并保存起止范围')
         source = interval.start.source_id if interval.start else (interval.time_source_id or self.target_id)
         return interval_indices(interval, self.mapping(source),
             timestamps_s=self.trace_metadata.get('trace_timestamp_s'),
@@ -177,6 +184,7 @@ def project_rows(view):
     mappings = {}
     geometries = {}
     for record in view.document.records:
+        issue = ''
         if isinstance(record, MarkerRecord):
             source = record.anchor.source_id if record.anchor else ''
             if source not in mappings:
@@ -185,25 +193,24 @@ def project_rows(view):
             position = (f'道 {projection.positions[0] + 1:g}' if projection.positions
                         else f'来源道 {record.anchor.trace + 1}' if record.anchor else '未定位')
         else:
-            projection = _interval_projection(record, view, mappings)
+            issue = interval_boundary_issue(record, view.markers_by_id)
+            projection = MarkerProjection('unmapped') if issue else _interval_projection(record, view, mappings)
             position = ('；'.join(f'{a + 1}–{b}' for a, b in projection.spans[:2]) + ' 道'
                         + (f'（共 {len(projection.spans)} 段）' if len(projection.spans) > 2 else '')
                         if projection.spans else '无当前道' if projection.status in ('outside', 'empty')
                         else '采集时间' if record.time_start else '开放范围' if not record.closed else '来源范围')
-        status = ('excluded' if record.excluded else 'needs_review'
-                  if isinstance(record, EventInterval) and record.review_state == 'needs_review'
-                  else projection.status)
+        status = STATUS_LABELS['excluded'] if record.excluded else issue or STATUS_LABELS[projection.status]
         geometry_key = (projection, getattr(record, 'anchor', None), getattr(record, 'start', None),
                         getattr(record, 'end', None), getattr(record, 'include_start', True), getattr(record, 'include_end', True))
-        if geometry_key not in geometries:
+        if not issue and geometry_key not in geometries:
             geometries[geometry_key] = (projected_geometry(projection, raw_mapping, track, prepared)
                                        if view.artifact_id or (isinstance(record, EventInterval) and record.time_start)
                                        else reference_geometry(record, view.document.source_id, track, prepared))
         rows.append({'uid': record.uid, 'record': record, 'projection': projection,
                      'name': record.name or f'标记 {record.uid[:8]}', 'purpose': record.purpose,
-                     'position': position, 'status': STATUS_LABELS[status], 'line_id': view.document.line_id,
+                     'position': position, 'status': status, 'line_id': view.document.line_id,
                      'artifact_id': view.artifact_id, 'target_id': view.target_id,
-                     'geometry': geometries[geometry_key]})
+                     'boundary_issue': issue, 'geometry': None if issue else geometries[geometry_key]})
     return tuple(rows)
 
 
@@ -221,9 +228,8 @@ def _interval_projection(record, view, mappings):
     if source not in mappings:
         mappings[source] = view.mapping(source)
     mapping = mappings[source]
-    # Review state affects usability, not the visibility of saved boundaries.
     try:
-        left, right = interval_bounds(replace(record, excluded=False, review_state='unreviewed'), mapping,
+        left, right = interval_bounds(replace(record, excluded=False), mapping,
             timestamps_s=view.trace_metadata.get('trace_timestamp_s'), time_basis_confirmed=view.time_basis_confirmed)
     except ValueError:
         return MarkerProjection('unmapped')

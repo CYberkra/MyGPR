@@ -2,16 +2,17 @@
 import numpy as np
 from mygpr.domain.markers.models import MarkerDocument, MarkerRecord
 from mygpr.domain.markers.mapping import TraceMapping
+from mygpr.domain.markers.operations import interval_boundary_issue
 from mygpr.domain.markers.ranges import interval_indices
 
 
-def draw_marker_strip(ax, payload, dataset):
+def draw_marker_strip(ax, payload, dataset, *, x_axis=None):
     if not payload:
         return
     document = MarkerDocument.from_dict(payload)
     mapping = TraceMapping.identity(document.source_id, dataset.trace_count)
     marks, unavailable = [], 0
-    distance = np.asarray(dataset.distance_axis_m)
+    positions = np.asarray(dataset.distance_axis_m if x_axis is None else x_axis)
     # Report datasets carry source metadata, unlike processing bundles which
     # expose separate header_info / trace_metadata dictionaries.
     from core.acquisition_hdf5 import acquisition_trace_metadata
@@ -19,22 +20,24 @@ def draw_marker_strip(ax, payload, dataset):
     trace = acquisition_trace_metadata(metadata)
     times = trace.get('trace_timestamp_s', metadata.get('trace_timestamp_s'))
     confirmed = 'timestamp_ms' in trace or metadata.get('trace_time_basis') == 'UTC'
+    markers = {mark.uid: mark for mark in document.markers}
     for record in document.records:
         if record.excluded:
             continue
         if isinstance(record, MarkerRecord):
-            if record.anchor and record.anchor.source_id == document.source_id and record.anchor.trace < len(distance):
-                marks.append((float(distance[record.anchor.trace]), float(distance[record.anchor.trace]), record.name))
+            if record.anchor and record.anchor.source_id == document.source_id and record.anchor.trace < len(positions):
+                position = float(positions[record.anchor.trace])
+                marks.append((position, position, record.name))
             else:
                 unavailable += 1
-        elif record.closed:
+        elif record.closed and not interval_boundary_issue(record, markers):
             try:
                 indices = interval_indices(record, mapping, timestamps_s=times, time_basis_confirmed=confirmed)
             except ValueError:
                 unavailable += 1
                 continue
             if indices.size:
-                marks.append((float(distance[indices[0]]), float(distance[indices[-1]]), record.name))
+                marks.append((float(positions[indices[0]]), float(positions[indices[-1]]), record.name))
             else:
                 unavailable += 1
         else:

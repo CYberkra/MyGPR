@@ -316,6 +316,19 @@ def _extract_parameter_schema(raw: Mapping[str, Any]) -> tuple[dict, ...]:
     return tuple(visible_items)
 
 
+_TIME_CUT_FIELDS = {
+    "mode": {
+        "choices": ("remove_below", "remove_above", "keep_range"),
+        "choice_labels": {"remove_below": "裁掉结束时间后",
+                          "remove_above": "裁掉起始时间前",
+                          "keep_range": "保留时间范围"},
+    },
+    "time_start_ns": {"visible_when": {"mode": ("remove_above", "keep_range")}},
+    "time_end_ns": {"tooltip": "填 0 时保留到剖面底部",
+                    "visible_when": {"mode": ("remove_below", "keep_range")}},
+}
+
+
 def method_catalog() -> tuple[UiMethodEntry, ...]:
     """Return the processing method catalog as typed, immutable DTOs.
 
@@ -336,6 +349,9 @@ def method_catalog() -> tuple[UiMethodEntry, ...]:
         meta = METHOD_METADATA.get(method_id, {})
         category = str(meta.get("category") or raw.get("category") or "experimental")
         tag = METHOD_TAGS.get(method_id)
+        fields = _extract_parameter_schema(raw)
+        if method_id == "time_cut":
+            fields = tuple({**field, **_TIME_CUT_FIELDS.get(field["name"], {})} for field in fields)
         entry = UiMethodEntry(
             method_id=str(method_id),
             name=str(raw.get("name", method_id)),
@@ -344,7 +360,7 @@ def method_catalog() -> tuple[UiMethodEntry, ...]:
             category_label=str(METHOD_CATEGORY_LABELS.get(category, category)),
             tags=(str(tag),) if tag else (),
             auto_tune_enabled=bool(raw.get("auto_tune_enabled", False)),
-            parameter_schema=_extract_parameter_schema(raw),
+            parameter_schema=fields,
             description=str(raw.get("description") or ""),
         )
         items.append(entry)

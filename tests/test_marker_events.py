@@ -25,7 +25,7 @@ def test_identical_labels_keep_distinct_stable_identity():
     assert document().markers[0].anchor.trace == 2
 
 
-def test_source_record_is_immutable_and_revisions_invalidate_interval():
+def test_editing_acquisition_marker_text_keeps_the_interval_snapshot():
     doc = document()
     mark = doc.markers[0]
     interval = EventInterval(uid='event', name='停车等待', start=mark.anchor,
@@ -35,7 +35,7 @@ def test_source_record_is_immutable_and_revisions_invalidate_interval():
     edited = replace(mark, name='等车', note='车辆通过')
     updated = put_record(doc, edited)
     assert updated.markers[0].original['label'] == '停车'
-    assert updated.intervals[0].review_state == 'needs_review'
+    assert updated.intervals == doc.intervals
     with pytest.raises(ValueError, match='采集'):
         remove_record(updated, mark.uid)
 
@@ -47,6 +47,15 @@ def test_roundtrip_and_duplicate_identity_rejection():
     payload['markers'].append(payload['markers'][0])
     with pytest.raises(ValueError, match='重复'):
         MarkerDocument.from_dict(payload)
+
+
+def test_load_old_interval_workflow_flag_without_changing_saved_boundaries():
+    doc = put_record(document(), EventInterval(start=MarkerAnchor('raw:one', 2), end=MarkerAnchor('raw:one', 5)))
+    payload = doc.to_dict()
+    payload['intervals'][0]['review_state'] = 'needs_review'
+    restored = MarkerDocument.from_dict(payload)
+    assert restored == doc
+    assert 'review_state' not in restored.to_dict()['intervals'][0]
 
 
 @pytest.mark.parametrize('include_start,include_end,expected', [

@@ -131,7 +131,7 @@ def test_corrupted_container_load_raises_with_actionable_hint(tmp_path: Path) ->
     pytest.importorskip("PyQt6")
     from ui.controllers.backend_controller import friendly_error_message
     mapped = friendly_error_message(excinfo.value)
-    assert "数据文件损坏" in mapped
+    assert "无法读取数据文件" in mapped
     assert "重新导入" in mapped
 
 

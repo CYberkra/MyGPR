@@ -223,9 +223,9 @@ def test_canvas_menu_keeps_viewing_actions_and_opens_the_settings_section(prefer
     monkeypatch.setattr(page, 'focus_bscan_settings', lambda: focused.append(True))
     view._show_context_menu(SimpleNamespace(screenPos=lambda: QPointF(20, 20)))
     actions = {action.text(): action for action in menus[0].actions()}
-    assert {'框选放大', '适应全图', '复制图像', '导出图件…', '当前图显示…'} <= actions.keys()
+    assert {'框选放大', '适应全图', '复制图像', '导出图件…', '当前视图显示设置…'} <= actions.keys()
     assert not {'色阶跟随查看范围', '色阶设置…', '显示色标', '显示异常道标记'} & actions.keys()
-    actions['当前图显示…'].trigger()
+    actions['当前视图显示设置…'].trigger()
     settings = next(action for action in menus[1].actions() if action.text() == '全局 B-scan 设置…')
     settings.trigger()
     qapp.processEvents()

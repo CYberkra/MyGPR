@@ -27,7 +27,7 @@ from PyQt6.QtCore import QObject, QRectF, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF
-from qfluentwidgets import ToolButton, isDarkTheme
+from qfluentwidgets import PushButton, ToolButton, isDarkTheme
 
 from ui import constants
 from ui.desktop_backend_facade import tile_cache_dir
@@ -514,9 +514,10 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
 
         # ---------------- 浮动覆盖层（子控件，resizeEvent 中定位） ----------------
         # 全幅空态引导（评审 P0-1）：先于其他浮层创建，图例/缩放钮保持其上
+        self.sync_track_button = PushButton('传感器同步…', self, FIF.SYNC)
+        self.sync_track_button.hide()
         self._empty_overlay = EmptyStateOverlay(
-            self, icon=FIF.GLOBE, title='暂无定位轨迹',
-            hint='打开含定位信息的测线后，此处显示底图与航迹')
+            self, icon=FIF.GLOBE, title='暂无定位轨迹', action=self.sync_track_button)
 
         # 左上：测线图例（色块 + 名称），set_tracks 时重建
         self._legend = QFrame(self)
@@ -650,8 +651,11 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         self._raw_tracks = list(tracks or [])
         self._track_colors = dict(colors or {})
         self._render_tracks()
-        # 空态引导：无任何测线时显示（评审 P0-1）
-        self._empty_overlay.setVisible(not self._raw_tracks)
+
+    def set_empty_message(self, text: str, *, can_sync: bool = False) -> None:
+        self._empty_overlay._title_label.setText(text)
+        self.sync_track_button.setVisible(can_sync)
+        self._empty_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, not can_sync)
 
     def _render_tracks(self) -> None:
         """按当前底图坐标系（WGS84 / GCJ-02）转换并绘制测线。"""
@@ -694,6 +698,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
             self._overlay_layer.setVisible(self._basemap_enabled and overlay_key is not None)
         self.fit_to_tracks()
         self._rebuild_legend()
+        self._empty_overlay.setVisible(not all_x)
 
     def shutdown(self) -> None:
         """Drain both base and annotation layers before Qt destroys their pools."""
@@ -744,7 +749,7 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
         entries = []
         for info in self._track_summaries:
             label = info.get('name') or info.get('line_id')
-            if not label:
+            if not label or not np.any(np.isfinite(info['xs']) & np.isfinite(info['ys'])):
                 continue
             color = self._track_colors.get(info.get('line_id'), constants.CHART_TRACK_DEFAULT)
             entries.append((label, color))

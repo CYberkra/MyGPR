@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QApplication, QBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QApplication, QBoxLayout, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import PrimaryPushButton, PushButton, ScrollArea, SearchLineEdit, isDarkTheme
@@ -71,7 +71,7 @@ class HomePage(ScrollArea):
         self._sidebar_layout = QVBoxLayout(self._sidebar)
         self._sidebar_layout.setContentsMargins(20, 28, 20, 20)
         self._sidebar_layout.setSpacing(12)
-        self.open_btn = PrimaryPushButton('打开项目', self._sidebar, FIF.FOLDER)
+        self.open_btn = PrimaryPushButton('打开项目…', self._sidebar, FIF.FOLDER)
         self.new_btn = PushButton('新建项目', self._sidebar, FIF.ADD)
         self.restore_btn = PushButton('从备份恢复…', self._sidebar)
         self.restore_btn.clicked.connect(self.restore_requested)
@@ -84,15 +84,13 @@ class HomePage(ScrollArea):
         self._sidebar_layout.addLayout(self._action_layout)
         self._sidebar_layout.addWidget(self.restore_btn)
         self._filter_layout = QBoxLayout(QBoxLayout.Direction.TopToBottom)
-        self.recent_btn = PushButton('最近打开', self._sidebar)
-        self.pinned_btn = PushButton('已固定', self._sidebar, FIF.PIN)
+        self.recent_btn = PushButton('最近', self._sidebar)
+        self.pinned_btn = PushButton('固定', self._sidebar, FIF.PIN)
         for button, pinned in ((self.recent_btn, False), (self.pinned_btn, True)):
             button.setCheckable(True)
             button.clicked.connect(lambda _checked=False, p=pinned: self._set_filter(p))
             self._filter_layout.addWidget(button)
         self._filter_layout.setSpacing(6)
-        self._sidebar_layout.addSpacing(14)
-        self._sidebar_layout.addLayout(self._filter_layout)
         self._sidebar_layout.addStretch(1)
         self._layout.addWidget(self._sidebar)
         for button in (self.open_btn, self.new_btn, self.recent_btn, self.pinned_btn):
@@ -103,9 +101,9 @@ class HomePage(ScrollArea):
         main = QVBoxLayout(self._main)
         main.setContentsMargins(30, 28, 30, 24)
         main.setSpacing(18)
-        self._title = QLabel('最近项目', self._main)
-        self._title.setObjectName('startupTitle')
-        main.addWidget(self._title)
+        self._filter_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+        self._filter_layout.addStretch(1)
+        main.addLayout(self._filter_layout)
         self.search = SearchLineEdit(self._main)
         self.search.setPlaceholderText('搜索项目')
         self.search.setAccessibleName('搜索项目名称或路径')
@@ -170,15 +168,18 @@ class HomePage(ScrollArea):
             label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             detail.addWidget(label)
-        self.detail_open_btn = PrimaryPushButton('打开项目', self._details, FIF.FOLDER)
+        self.detail_open_btn = PrimaryPushButton('打开所选项目', self._details, FIF.FOLDER)
         self.detail_open_btn.setMinimumHeight(38)
         self.detail_open_btn.clicked.connect(lambda: self._request_open(self._selected_path))
-        detail.addWidget(self.detail_open_btn)
         self._remove_btn = PushButton('从最近列表移除', self._details)
         self._remove_btn.clicked.connect(lambda: self._remove_recent(self._selected_path))
         detail.addWidget(self._remove_btn)
         detail.addStretch(1)
         self._browser_layout.addWidget(self._details)
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        actions.addWidget(self.detail_open_btn)
+        self._list_column.layout().addLayout(actions)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -194,7 +195,6 @@ class HomePage(ScrollArea):
         else:
             self._sidebar.setFixedWidth(208)
         self._action_layout.setDirection(direction.LeftToRight if narrow else direction.TopToBottom)
-        self._filter_layout.setDirection(direction.LeftToRight if narrow else direction.TopToBottom)
         self._sidebar_layout.setContentsMargins(*((16, 16, 16, 12) if narrow else (20, 28, 20, 20)))
         margin = 16 if narrow else 30
         self._main.layout().setContentsMargins(margin, 24, margin, 24)
@@ -273,11 +273,8 @@ class HomePage(ScrollArea):
         self._recent_list.setVisible(bool(paths))
         self._empty.setVisible(not paths)
         self.search.setVisible(bool(self._recent_paths))
-        self.recent_btn.setText(f'最近打开  {len(self._recent_paths)}')
-        self.pinned_btn.setText(f'已固定  {len(self._pinned_paths)}')
         self.recent_btn.setChecked(not self._pinned_only)
         self.pinned_btn.setChecked(self._pinned_only)
-        self._title.setText('已固定' if self._pinned_only else '最近项目')
         self._recent_hint.setText('没有匹配的项目' if query else '还没有固定项目' if self._pinned_only else '还没有项目')
         self._empty_action.setText('清空搜索' if query else '查看最近项目' if self._pinned_only else '新建项目')
         self.set_busy(self._busy)
@@ -301,16 +298,19 @@ class HomePage(ScrollArea):
 
     def _update_details(self) -> None:
         path = self._selected_path
-        self._details.setVisible(bool(path))
         for key, (_item, row) in self._rows.items():
             row.set_selected(key == path)
+        error = self._availability.get(path)
+        self._details.setVisible(bool(path) and error != '')
         self._detail_name.setText(self._project_display_name(path) if path else '')
         self._detail_path.setText(path)
-        error = self._availability.get(path)
+        self._detail_name.setVisible(bool(error))
+        self._detail_path.setVisible(bool(error))
         self._detail_state.setText(error if error is not None else '正在检查目录…')
         self._detail_state.setVisible(bool(path) and error != '')
         opening = self._busy and self._opening_path == path
-        self.detail_open_btn.setText('正在打开…' if opening else '重试打开' if error else '打开项目')
+        self.detail_open_btn.setText('正在打开…' if opening else '重试打开' if error else '打开所选项目')
+        self.detail_open_btn.setVisible(bool(path))
         self.detail_open_btn.setEnabled(bool(path) and self._backend_ready and not self._busy)
         self._remove_btn.setVisible(bool(error))
         self._remove_btn.setEnabled(not self._busy)
@@ -493,7 +493,6 @@ class HomePage(ScrollArea):
             f'#startupContent {{ background: {color("bg_surface", dark)}; border-radius: {radius("xl")}px; }}'
             f'#startupSidebar, #startupDetails {{ background: {color("bg_subtle", dark)};'
             f' border-radius: {radius("lg")}px; }}'
-            f'#startupTitle {{ color: {color("text_primary", dark)}; font-size: 28px; font-weight: 600; }}'
             f'#startupProjectName {{ color: {color("text_primary", dark)}; font-size: 19px; font-weight: 600; }}'
             f'#startupProjectPath {{ color: {color("text_muted", dark)}; font-size: 12px; }}'
             f'#startupEmpty {{ color: {color("text_secondary", dark)}; font-size: 18px; }}'

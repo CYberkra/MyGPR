@@ -25,7 +25,7 @@ def test_startup_and_output_panel_drop_repeated_instructions(qapp):
 
 def test_processing_uses_state_text_instead_of_static_tutorials(processing_page):  # noqa: F811
     page = processing_page
-    assert page._input_label.text().startswith('输入：')
+    assert page._input_label.text().startswith('输入 · ')
     assert page._param_empty_hint.text() == '未选择处理步骤'
     assert page._estimate_label.text() == ''
     assert page._autotune_method_label.text() == ''
@@ -50,7 +50,7 @@ def test_processing_display_and_fit_buttons_live_in_workspace_tab_bar(processing
     assert not hasattr(page, '_fit_view_btn')
     workspace = page._workspace
     group = workspace.group_widget()
-    for button, name in ((group.display_settings, '当前图显示'),
+    for button, name in ((group.display_settings, '当前视图显示设置'),
                          (group.fit_view, '适应全图')):
         assert button.isVisible()
         assert button.accessibleName() == name

@@ -19,6 +19,7 @@ class SpatialDeliveryMixin:
         row.addWidget(self._spatial_results_btn)
         row.addStretch(1)
         layout.addLayout(row)
+        return row
 
     def _build_spatial_delivery(self, layout, map_route):
         self._delivery_map_route = map_route
@@ -36,6 +37,7 @@ class SpatialDeliveryMixin:
 
     def _show_spatial_delivery(self, visible):
         self._spatial_tools_stack.setCurrentIndex(int(visible))
+        self._sync_right_panel_visibility()
         if visible:
             self._right_panel.set_collapsed(False)
 

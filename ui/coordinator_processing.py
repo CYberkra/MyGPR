@@ -531,18 +531,13 @@ class ProcessingChain:
         # Keep it empty until this session's source preview arrives.
         interpretation.set_bundle(None)
         interpretation.set_points(self._snapshot_points(snapshot))
-        line_id = str(getattr(snapshot, 'line_id', '') or ''
-                      ) or self._co.project.current_line_id
-        interpretation.set_session_info(f'会话已打开（{line_id}）')
         interpretation.set_session_active(True)
         interpretation.set_session_source(str(getattr(snapshot, 'input_artifact_id', '') or ''))
         annotation = getattr(snapshot, 'annotation', None)
-        interpretation.set_saved_status(getattr(annotation, 'status', 'draft'))
+        interpretation.set_saved_status(getattr(annotation, 'status', None))
         interpretation.set_annotation_metadata(annotation)
         if dict(getattr(snapshot, 'audit', {}) or {}).get('source_changed'):
             self._co.infobar('warning', '界面解释标注', '原有标注属于其他数据来源；当前显示新草稿，保存前原标注仍保留。')
-        else:
-            self._co.infobar('success', '界面解释标注', f'标注会话已打开：{line_id}')
         if self._co.project_controller is not None and self._co.project.current_line_id:
             artifact_id = str(getattr(snapshot, 'input_artifact_id', '') or '')
             if artifact_id:
@@ -560,7 +555,7 @@ class ProcessingChain:
         self._interpretation_snapshot = snapshot
         page = self._co.page('interpretationInterface')
         page.set_points(self._snapshot_points(snapshot))
-        page._mark_review_required()
+        page.mark_unsaved()
 
     def interpretation_uses_source(self, artifact_id: str) -> bool:
         """Only a live session may receive its artifact; raw is the default."""

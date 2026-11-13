@@ -4,12 +4,38 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+import numpy as np
 from openpyxl import load_workbook
 
 from core.field_project_operations import import_line_data
-from core.field_project_store import FieldProjectStore
-from core.field_report_export import generate_project_report_package
+from core.field_project_store import FieldLineRecord, FieldProjectStore
+from core.field_report_export import _select_report_scope, generate_project_report_package
+from core.report_profiles import project_ranges
+from core.trajectory_model import TrajectoryModel, TrajectoryPoint
+from mygpr.domain.markers.mapping import TraceMapping
+
+
+def test_explicit_empty_report_scope_does_not_expand_to_everything(monkeypatch):
+    line = SimpleNamespace(line_id="L01")
+    artifact = SimpleNamespace(line_id="L01", artifact_id="A1")
+    store = SimpleNamespace(root=Path("."), list_lines=lambda: [line])
+    monkeypatch.setattr("core.field_report_export.index_processing_artifacts", lambda _root: [artifact])
+
+    assert _select_report_scope(store, selected_line_ids=None, selected_artifact_ids=None) == ([line], [artifact])
+    assert _select_report_scope(store, selected_line_ids=("L01",), selected_artifact_ids=()) == ([line], [])
+    with pytest.raises(ValueError, match="请至少选择一条"):
+        _select_report_scope(store, selected_line_ids=(), selected_artifact_ids=None)
+
+
+def test_report_range_projection_keeps_only_retained_fragments():
+    segments = np.array([0, 0, 1, 1, 1])
+    mapping = TraceMapping('raw:1', 'A1', np.array([0, 1, 6, 7, 8]), segments, 'selection')
+    ranges = [('L01-F01', 1, 8), ('L01-A01', 2, 6)]
+    assert project_ranges(ranges, mapping, segments) == [('L01-F01', 1, 2), ('L01-F01', 2, 4)]
+    assert project_ranges(ranges, None, segments) == []
 
 
 def test_formal_report_contains_excel_audit_figures_approvals_and_checksums(tmp_path: Path) -> None:
@@ -26,6 +52,12 @@ def test_formal_report_contains_excel_audit_figures_approvals_and_checksums(tmp_
         line_id="L01",
         name="一号测线",
     )
+    store.upsert_line(FieldLineRecord('L02', '未选线'))
+    for line_id, east in [('L01', 500000), ('L02', 500200)]:
+        store.save_trajectory(line_id, TrajectoryModel([
+            TrajectoryPoint(distance_m=i, x=east + i, y=3300000 + i / 2, z=100, trace_index=i)
+            for i in (0, 1, 4, 5)
+        ]))
     result = generate_project_report_package(
         store,
         package_name="formal_delivery",
@@ -34,6 +66,11 @@ def test_formal_report_contains_excel_audit_figures_approvals_and_checksums(tmp_
             "reviewer": "复核人",
             "approver": "批准人",
             "revision": "A",
+            'selected_line_ids': ['L01'],
+            'primary_artifacts': {'L01': ''},
+            'project_analysis': {'objective': '确认交付范围'},
+            'line_analysis': {'L01': {'first_trace': 2, 'last_trace': 5, 'observation': '重点区段'}},
+            'acquisition_overrides': {'L01': {'power': '5 dBm（设定）', 'source': '采集记录'}},
         },
     )
 
@@ -50,6 +87,19 @@ def test_formal_report_contains_excel_audit_figures_approvals_and_checksums(tmp_
     assert pdf.exists() and pdf.stat().st_size > 0
     assert html.exists() and "批准人" in html.read_text(encoding="utf-8")
     assert figures.is_dir() and any(figures.glob("*.png"))
+    dossiers = json.loads((package / 'json/line_dossiers.json').read_text(encoding='utf-8'))
+    assert dossiers['plan_map'] == 'project_plan_map.png'
+    assert [item['line_id'] for item in dossiers['lines']] == ['L01']
+    line = dossiers['lines'][0]
+    assert line['acquisition']['功率'] == '5 dBm（设定）'
+    assert line['analysis']['code'] == 'L01-F01'
+    assert line['raw_figure'] == 'L01_raw.png'
+    assert line['route_figure'] == dossiers['plan_map']
+    assert line['processed_figure'] == ''
+    assert line['detail_figures'] == ['L01-F01_raw.png']
+    assert all((figures / name).is_file() for name in [dossiers['plan_map'], line['raw_figure'], *line['detail_figures']])
+    assert (package / 'json/processing_parameters.json').is_file()
+    assert '重点区段' in html.read_text(encoding='utf-8')
 
     workbook = load_workbook(xlsx, read_only=True)
     assert {"测线清单", "数据质检", "传感器同步", "基覆界面", "处理记录", "空间成果", "GIS图层"}.issubset(workbook.sheetnames)

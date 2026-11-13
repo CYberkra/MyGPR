@@ -230,7 +230,7 @@ class FieldMethodCompatibilityRecord:
         if not self.finite_output:
             return "输出异常"
         if not self.trace_count_preserved:
-            return "需人工复核"
+            return "道数有变化"
         return "通过"
 
     def to_report_row(self) -> dict[str, Any]:
@@ -528,7 +528,7 @@ def run_registered_method(
         warnings.append(
             {
                 "code": "trace_count_changed",
-                "message": "输出道数与输入不一致，保存前需要人工复核。",
+                "message": f"道数从 {input_shape[1]} 变为 {output_shape[1]}。",
                 "method_id": method_id,
                 "input_shape": list(input_shape),
                 "output_shape": list(output_shape),
@@ -538,7 +538,7 @@ def run_registered_method(
         warnings.append(
             {
                 "code": "non_finite_output",
-                "message": "算法输出包含 NaN 或 Inf，保存前需要人工复核。",
+                "message": "输出包含无效数值（NaN 或 Inf）。",
                 "method_id": method_id,
             }
         )

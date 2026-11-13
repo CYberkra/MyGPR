@@ -867,7 +867,7 @@ class FileTreePanel(DockPanel):
             parent = artifact_direct_parent(artifact)
             details.extend([
                 f'名称：{getattr(artifact, "name", "")}',
-                f'直接输入：{"来源待核对" if parent is None else parent or "原始输入"}',
+                f'直接输入：{"未记录" if parent is None else parent or "原始输入"}',
                 f'形状：{getattr(artifact, "shape", ())}',
                 f'数据类型：{getattr(artifact, "dtype", "") or "未记录"}',
                 f'输出 SHA-256：{getattr(artifact, "sha256", "") or "未记录"}',
