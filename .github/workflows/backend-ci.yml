@@ -112,11 +112,12 @@ jobs:
       - name: Full pytest (retry once on known Qt-offscreen exit crash)
         shell: bash
         run: |
-          QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q -x --tb=short --timeout=120 --timeout-method=thread && exit 0
+          pytest_args=(tests/ -v -x --tb=short --timeout=120 --timeout-method=thread -o faulthandler_timeout=45)
+          QT_QPA_PLATFORM=offscreen python -m pytest "${pytest_args[@]}" && exit 0
           code=$?
           if [ "$code" -eq 139 ]; then
             echo "::warning::known Qt-offscreen exit segfault (139), retrying once"
-            QT_QPA_PLATFORM=offscreen python -m pytest tests/ -q -x --tb=short --timeout=120 --timeout-method=thread
+            QT_QPA_PLATFORM=offscreen python -m pytest "${pytest_args[@]}"
           else
             exit "$code"
           fi
