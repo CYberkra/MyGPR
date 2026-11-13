@@ -1,6 +1,6 @@
 # Start MyGPR
 
-Windows x64 users can install the [latest release](https://github.com/CYberkra/MyGPR/releases/latest), which includes Python and Qt. To upgrade a release without the updater, run the new installer. In the v0.11.5 installer edition, open **设置 → 关于** for updates and the user guide.
+Windows x64 users can install the [latest release](https://github.com/CYberkra/MyGPR/releases/latest), which includes Python and Qt. To upgrade a release without the updater, run the new installer. In the v0.12.0 installer edition, open **设置 → 关于** for updates and the user guide.
 
 For source development, use Python **3.12–3.13**. See [README](README.md) for pinned dependencies and [GUI guide](GUI_README.md) for desktop usage.
 

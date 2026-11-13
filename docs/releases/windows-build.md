@@ -14,15 +14,15 @@ GitHub Actions 使用 Python **3.13**。自行使用 3.12 构建时需 ≥3.12.1
 
 ```powershell
 py -3.13 -m venv output/windows-build-env
-output/windows-build-env/Scripts/python.exe -m pip install "./mygpr-0.11.5-py3-none-any.whl[gui]" -r requirements-windows-build.txt
-./packaging/windows/build.ps1 -Python ./output/windows-build-env/Scripts/python.exe -InnoCompiler 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' -SourceRef v0.11.5 -OutputRoot output/windows-installer-v0.11.5
+output/windows-build-env/Scripts/python.exe -m pip install "./mygpr-0.12.0-py3-none-any.whl[gui]" -r requirements-windows-build.txt
+./packaging/windows/build.ps1 -Python ./output/windows-build-env/Scripts/python.exe -InnoCompiler 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' -SourceRef v0.12.0 -OutputRoot output/windows-installer-v0.12.0
 ```
 
 工具基线：PyInstaller 6.22.3、hooks-contrib 2026.8、Inno Setup 6.7.3。
 冻结阶段使用精简 PATH，拒绝收集构建环境之外的原生 DLL；Qt 运行库固定随 Qt 打包。
 先执行冻结程序的后端检查，通过后才压缩安装器。
 构建脚本只从 `SourceRef` 的 `git archive` 读取应用源码，不夹带工作区未提交内容。
-打包配方独立于应用 tag；不移动既有 tag。结果在 `output/windows-installer-v0.11.5/assets/`。
+打包配方独立于应用 tag；不移动既有 tag。结果在 `output/windows-installer-v0.12.0/assets/`。
 修改版本时需同步输出目录、源码 ref 和验证脚本中的预期版本。
 
 `packaging/windows/MyGPR.spec` 显式收集动态算法、配置、VERSION 和包元数据；
@@ -36,7 +36,7 @@ output/windows-build-env/Scripts/python.exe -m pip install "./mygpr-0.11.5-py3-n
 
 ```powershell
 output/windows-build-env/Scripts/python.exe -m pip install pywinauto==0.6.9
-output/windows-build-env/Scripts/python.exe packaging/windows/verify_install.py output/windows-installer-v0.11.5/assets/MyGPR-0.11.5-Windows-x64-Setup.exe --expected-version 0.11.5 --hdf5 C:/path/lineData_streaming.h5 --output output/windows-installer-v0.11.5/qa
+output/windows-build-env/Scripts/python.exe packaging/windows/verify_install.py output/windows-installer-v0.12.0/assets/MyGPR-0.12.0-Windows-x64-Setup.exe --expected-version 0.12.0 --hdf5 C:/path/lineData_streaming.h5 --output output/windows-installer-v0.12.0/qa
 ```
 
 验证使用独立临时安装目录、设置文件和精简 PATH：安装、后端与 HDF5 检查、失败用例返回码、

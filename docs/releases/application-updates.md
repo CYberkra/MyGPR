@@ -37,7 +37,7 @@ Ed25519 更新签名是必需的，无需购买证书。Windows Authenticode 证
 使用最终安装包和同次构建的 `build-provenance.json`。脚本先验证安装包哈希及内置公钥与私钥相符，再签名、验签并原子写出文件。
 
 ```powershell
-.\.venv\Scripts\python.exe -m scripts.publish_windows_update --private-key "$env:USERPROFILE/.mygpr-publisher/windows-ed25519.key" --installer output/windows-updater-build/assets/MyGPR-0.11.5-Windows-x64-Setup.exe --build-manifest output/windows-updater-build/build-provenance.json --version 0.11.5 --url https://github.com/CYberkra/MyGPR/releases/download/v0.11.5/MyGPR-0.11.5-Windows-x64-Setup.exe --notes-url https://github.com/CYberkra/MyGPR/releases/tag/v0.11.5 --channel stable --output output/windows-updater-feed
+.\.venv\Scripts\python.exe -m scripts.publish_windows_update --private-key "$env:USERPROFILE/.mygpr-publisher/windows-ed25519.key" --installer output/windows-updater-build/assets/MyGPR-0.12.0-Windows-x64-Setup.exe --build-manifest output/windows-updater-build/build-provenance.json --version 0.12.0 --url https://github.com/CYberkra/MyGPR/releases/download/v0.12.0/MyGPR-0.12.0-Windows-x64-Setup.exe --notes-url https://github.com/CYberkra/MyGPR/releases/tag/v0.12.0 --channel stable --output output/windows-updater-feed
 ```
 
 命令不发布任何内容。版本及 URL 必须换成实际新发行版，不能移动已有 tag 或替换已发布安装包。预览版本支持 `aN`、`bN`、`rcN`，必须用 `--channel preview` 和独立 feed。Windows 数值构建号保证同一版本的 alpha < beta < rc < final。
