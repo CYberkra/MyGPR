@@ -223,40 +223,6 @@ class TestMainWindowPersistsGeneralSettings:
             win.close()
 
 
-# ============================================================ 结果卡 hover 操作钮
-class TestResultCardHoverActions:
-    """结果卡 hover 的「放大 / 并排对比」此前信号无人接收。"""
-
-    def test_compare_switches_view_mode_and_selection(self, qapp):
-        from ui.widgets.bscan_result_grid import ResultGrid, VIEW_COMPARE
-        grid = ResultGrid()
-        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True},
-                        {'key': 'k1', 'title': '1 dewow', 'enabled': True},
-                        {'key': 'k2', 'title': '2 agc', 'enabled': True}])
-        grid.cards()[2].compare_btn.click()
-        assert grid.view_mode() == VIEW_COMPARE
-        assert grid._selected_key == 'k2'
-
-    def test_expand_calls_fullscreen(self, qapp, monkeypatch):
-        from ui.widgets.bscan_result_grid import ResultGrid
-        grid = ResultGrid()
-        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-        called = []
-        card = grid.cards()[0]
-        monkeypatch.setattr(card.view, 'toggle_fullscreen',
-                            lambda: called.append(1), raising=False)
-        card.expand_btn.click()
-        assert called == [1]
-
-    def test_hover_buttons_have_receivers(self, qapp):
-        from ui.widgets.bscan_result_grid import ResultGrid
-        grid = ResultGrid()
-        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-        card = grid.cards()[0]
-        assert card.expand_btn.receivers(card.expand_btn.clicked) >= 1
-        assert card.compare_btn.receivers(card.compare_btn.clicked) >= 1
-
-
 # ============================================================ 处理页「输入数据」
 class TestProcessingInputTabs:
     """The selected result is the sole source for the next processing run."""

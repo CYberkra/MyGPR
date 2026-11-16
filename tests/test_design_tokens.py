@@ -114,30 +114,7 @@ class TestControlPaletteForwarding:
 
 
 class TestKeyboardReachable:
-    """键盘可达性（WCAG 2.1.1 / 2.4.7）：焦点环 + Enter/Space 激活。"""
-
-    def test_result_card_is_tab_reachable(self, qapp):
-        from PyQt6.QtCore import Qt
-        from ui.widgets.bscan_result_grid import _ResultCard
-        card = _ResultCard('k0', '输入')
-        assert card.focusPolicy() == Qt.FocusPolicy.StrongFocus
-
-    def test_result_card_has_focus_ring(self):
-        from ui.widgets.bscan_result_grid import _ResultCard
-        assert ':focus' in _ResultCard._normal_qss()
-
-    def test_result_card_enter_emits_selected(self, qapp):
-        from PyQt6.QtCore import QEvent, Qt
-        from PyQt6.QtGui import QKeyEvent
-        from ui.widgets.bscan_result_grid import _ResultCard
-        card = _ResultCard('k0', '输入')
-        got = []
-        card.sig_clicked.connect(got.append)
-        ev = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return,
-                       Qt.KeyboardModifier.NoModifier)
-        card.keyPressEvent(ev)
-        assert got == ['k0']
-        assert ev.isAccepted()
+    """键盘可达性（WCAG 2.1.1 / 2.4.7）：chip 列表焦点环。"""
 
     def test_chip_list_has_focus_ring(self, qapp):
         from ui.widgets.chain_strip import ChainStrip
@@ -161,13 +138,9 @@ class TestStatusContrastAA:
             assert _contrast(fg, bg) >= 4.4, key
 
     def test_click_targets_not_tiny(self):
-        """卡片辅助钮 ≥ 32px，主要图标钮 ≥ 36px；chip 内小钮 ≥ 18px。"""
+        """chip 内小钮 ≥ 18px，且尺寸走令牌而非字面量。"""
         from pathlib import Path
         repo = Path(__file__).resolve().parents[1]
-        grid = (repo / 'ui/widgets/bscan_result_grid.py').read_text(
-            encoding='utf-8')
-        assert 'setFixedSize(*constants.TOOL_BTN_COMPACT)' in grid
-        assert 'setFixedSize(20, 20)' not in grid
         strip = (repo / 'ui/widgets/chain_strip.py').read_text(
             encoding='utf-8')
         assert 'setFixedSize(12, 12)' not in strip
@@ -179,12 +152,6 @@ class TestStatusContrastAA:
 class TestComponentStateMatrix:
     """八状态矩阵落地防线：hover 态存在且色值走令牌（docs/design）。"""
 
-    def test_result_card_normal_qss_contains_hover(self):
-        from ui.widgets.bscan_result_grid import _ResultCard
-        qss = _ResultCard._normal_qss()
-        assert ':hover' in qss
-        assert 'transparent' in qss          # 常态无描边
-
     def test_chip_hover_only_when_enabled(self):
         from ui.widgets.chain_strip import _chip_qss
         assert ':hover' in _chip_qss(True)
@@ -195,11 +162,9 @@ class TestComponentStateMatrix:
     def test_hover_uses_primary_token_not_literal(self):
         """hover 描边必须是 primary 派生 rgba，不允许写死旧色值。"""
         from ui.design_tokens import tokens
-        from ui.widgets.bscan_result_grid import _ResultCard
         from ui.widgets.chain_strip import _chip_qss
         primary = tokens(False)['primary'].lstrip('#')
         rgb = ', '.join(str(int(primary[i:i + 2], 16)) for i in (0, 2, 4))
-        assert rgb in _ResultCard._normal_qss()
         assert rgb in _chip_qss(True)
 
 
