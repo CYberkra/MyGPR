@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""处理页 v2 组件契约：ChainStrip 手势 + ResultGrid 列数规则。
+"""处理页 v2 组件契约：ChainStrip 手势 + 处理页工作区行为。
 
-列数规则（2026-09-26 v2.1 定稿）：N=1 → 全幅；N≥2 → 两列大图
-（弃用三列规则）；网格卡无色标；点卡与链条 chip 双向同步高亮。
+点卡与链条 chip 双向同步高亮；处理页各 tab 的来源与管道状态以
+ProcessingPage 的公开 API 为准。
 """
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过
 
 from PyQt6.QtCore import QPointF  # noqa: E402
 from ui.pages.processing_page import ProcessingPage  # noqa: E402
-from ui.widgets.bscan_result_grid import ResultGrid  # noqa: E402
 from ui.widgets.chain_strip import ChainStrip  # noqa: E402
 
 
@@ -34,16 +33,6 @@ class _FakeDropEvent:
 
     def accept(self):
         self.accepted = True
-
-
-@pytest.fixture
-def grid(qapp):
-    return ResultGrid()
-
-
-def _slots(n: int, *, disabled=()):
-    return [{'key': f'k{i}', 'title': f'{i}', 'enabled': i not in disabled}
-            for i in range(n)]
 
 
 class TestChainStrip:
@@ -92,84 +81,6 @@ class TestChainStrip:
         assert strip._list.currentRow() == 2
 
 
-class TestResultGridColumns:
-    def _slots(self, n: int, *, disabled=()):
-        return [{'key': f'k{i}', 'title': f'{i}', 'enabled': i not in disabled}
-                for i in range(n)]
-
-    def _geometry(self, grid):
-        """返回每张卡所在 (row, col)。"""
-        out = []
-        for card in grid.cards():
-            index = grid._grid.indexOf(card)
-            if index < 0:
-                out.append(None)
-                continue
-            out.append(grid._grid.getItemPosition(index)[:2])
-        return out
-
-    def test_one_slot_full_width(self, grid):
-        grid.set_slots(_slots(1))
-        assert self._geometry(grid) == [(0, 0)]
-
-    def test_two_slots_side_by_side(self, grid):
-        grid.set_slots(_slots(2))
-        assert self._geometry(grid) == [(0, 0), (0, 1)]
-
-    def test_three_slots_two_columns(self, grid):
-        """N≥2 → 两列大图（v2.1 弃用三列）。"""
-        grid.set_slots(_slots(3))
-        assert self._geometry(grid) == [(0, 0), (0, 1), (1, 0)]
-
-    def test_four_slots_two_by_two(self, grid):
-        grid.set_slots(_slots(4))
-        assert self._geometry(grid) == [(0, 0), (0, 1), (1, 0), (1, 1)]
-
-    def test_six_slots_two_columns_three_rows(self, grid):
-        grid.set_slots(_slots(6))
-        assert self._geometry(grid) == [(0, 0), (0, 1),
-                                       (1, 0), (1, 1),
-                                       (2, 0), (2, 1)]
-
-    def test_disabled_step_is_placeholder(self, grid):
-        grid.set_slots(_slots(3, disabled=(1,)))
-        cards = grid.cards()
-        assert cards[1]._placeholder is True
-        assert cards[1].view is None           # 不占画布
-        assert cards[0].view is not None
-
-    def test_grid_cards_have_no_colorbar(self, grid):
-        """网格卡无色标——坐标/色标不挤占绘图区（看色标走放大/全屏）。"""
-        grid.set_slots(_slots(2))
-        for card in grid.cards():
-            assert card.view._colorbar is None
-
-    def test_set_selected_highlights_one_card(self, grid):
-        """选中卡用选中 QSS（色值走令牌，断言不绑具体字面量）。"""
-        grid.set_slots(_slots(3))
-        card_cls = type(grid.cards()[0])
-        sel_qss = card_cls._sel_qss()
-        normal_qss = card_cls._normal_qss()
-        grid.set_selected('k1')
-        styles = [c.styleSheet() for c in grid.cards()]
-        assert styles[1] == sel_qss
-        assert styles[0] == normal_qss
-        assert styles[2] == normal_qss
-
-    def test_card_click_forwards_key(self, grid):
-        got = []
-        grid.set_slots(_slots(3))
-        grid.sig_card_selected.connect(got.append)
-        grid.cards()[1].sig_clicked.emit('k1')     # 卡内鼠标路径的等价触发
-        assert got == ['k1']
-
-    def test_slots_reduce_removes_old_cards(self, grid):
-        grid.set_slots(_slots(4))
-        grid.set_slots(_slots(2))
-        assert len(grid.cards()) == 2
-        assert self._geometry(grid) == [(0, 0), (0, 1)]
-
-
 def _bundle(tag: float, samples: int = 8, traces: int = 6):
     """鸭子类型 PreviewBundle（矩阵全为 tag）。"""
     import numpy as np
@@ -192,17 +103,8 @@ def _saved_artifact(aid, method, group, step):
                              'run_input_artifact_id': '', 'step_input_artifact_id': ''}})
 
 
-class TestResultGridLazyPrinciple:
+class TestWorkspaceLazyPrinciple:
     """有数据才建画布：运行前不摆空 B-Scan 窗口。"""
-
-    def test_no_slots_shows_hint_only(self, grid):
-        assert grid.cards() == []
-        assert grid._empty.isVisibleTo(grid)
-
-    def test_slots_hide_hint(self, grid):
-        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-        assert not grid._empty.isVisibleTo(grid)
-        assert len(grid.cards()) == 1
 
     def test_page_before_run_opens_only_raw_in_one_group(self, qapp):
         page = ProcessingPage()
@@ -270,29 +172,6 @@ class TestRunButtonMotion:
         assert toggled == [(0, False)]
 
 
-class TestSkeletonReveal:
-    """结果卡骨架 → 出图交叉淡入（动效移植①）。"""
-
-    def test_new_card_shows_skeleton(self, grid):
-        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-        card = grid.cards()[0]
-        assert card._skeleton.isVisibleTo(card)
-        assert card._view_effect.opacity() == 0.0
-
-    def test_bundle_reveals_and_hides_skeleton(self, grid):
-        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-        card = grid.cards()[0]
-        grid.set_bundle('k0', _bundle(2))
-        assert card._fade_in.state() == card._fade_in.State.Running
-        assert card._fade_out.state() == card._fade_out.State.Running
-
-    def test_placeholder_card_has_no_skeleton(self, grid):
-        grid.set_slots([{'key': 'k0', 'title': '1 带通', 'enabled': False}])
-        card = grid.cards()[0]
-        assert card.view is None
-        assert not hasattr(card, '_skeleton')
-
-
 class TestChainSlidingPill:
     """链条选中滑动胶囊（动效移植②，来自 BeUI Tabs 思路）。"""
 
@@ -343,29 +222,6 @@ class TestStatusSemantics:
         finally:
             page.close()
 
-    def test_diff_update_reuses_cards(self, grid):
-        """key 未变的卡必须原地复用（同一实例）——整排重建会清空画面。"""
-        grid.set_slots(_slots(3))
-        before = [id(c) for c in grid.cards()]
-        grid.set_slots(_slots(3))
-        assert [id(c) for c in grid.cards()] == before
-
-    def test_bundle_survives_slots_rebuild(self, grid):
-        """已出图的卡在槽位重建后不得回到骨架（真机「消失几秒」回归锁）。"""
-        grid.set_slots(_slots(2))
-        grid.set_bundle('k0', _bundle(2))
-        card = grid.cards()[0]
-        matrix_before = card.view._matrix
-        grid.set_slots(_slots(2))
-        assert grid.cards()[0] is card               # 同一实例
-        assert card.view._matrix is matrix_before    # 画面未丢
-
-    def test_range_label_after_bundle(self, grid):
-        grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-        card = grid.cards()[0]
-        grid.set_bundle('k0', _bundle(2))
-        assert card.range_label.isVisibleTo(card)
-        assert '2' in card.range_label.text()
 
     def test_chain_dirty_label_toggles(self, qapp):
         strip = ChainStrip()
@@ -472,14 +328,6 @@ class TestCardClose:
         ])
         return page
 
-    def test_close_btn_forwards_key(self, grid):
-        # Standalone ResultGrid remains a library regression even though the page
-        # now uses BScanWorkspace.
-        grid.set_slots([{'key': 'step:0', 'title': 'AGC', 'enabled': True}])
-        got = []
-        grid.sig_card_close_requested.connect(got.append)
-        grid.cards()[0].close_btn.click()
-        assert got == ['step:0']
 
     def test_closed_result_stays_closed_after_catalog_and_new_run_refresh(self, qapp):
         page = self._page_with_run(qapp)
@@ -577,105 +425,6 @@ class TestChainAlternativePaths:
         assert not hasattr(strip, '_fill_step_menu')
 
 
-class TestViewModes:
-    """三种视图模式（2026-09-27 v2.3，参考用户设计稿）。"""
-
-    def test_all_mode_shows_every_card(self, grid):
-        grid.set_slots(_slots(4))
-        grid.set_view_mode('all')
-        assert all(c.isVisibleTo(grid) for c in grid.cards())
-
-    def test_single_mode_shows_selected_only(self, grid, qapp):
-        grid.show()
-        qapp.processEvents()
-        grid.set_slots(_slots(4))
-        grid.set_selected('k2')
-        grid.set_view_mode('single')
-        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
-        assert visible == ['k2']
-
-    def test_single_mode_without_selection_shows_last(self, grid, qapp):
-        grid.show()
-        qapp.processEvents()
-        grid.set_slots(_slots(3))
-        grid.set_view_mode('single')
-        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
-        assert visible == ['k2']
-
-    def test_compare_mode_shows_prev_and_selected(self, grid, qapp):
-        grid.show()
-        qapp.processEvents()
-        grid.set_slots(_slots(4))
-        grid.set_selected('k2')
-        grid.set_view_mode('compare')
-        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
-        assert visible == ['k1', 'k2']
-
-    def test_compare_mode_selected_input_shows_first_pair(self, grid, qapp):
-        grid.show()
-        qapp.processEvents()
-        grid.set_slots(_slots(3))
-        grid.set_selected('k0')
-        grid.set_view_mode('compare')
-        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
-        assert visible == ['k0', 'k1']
-
-    def test_mode_switch_back_restores_all(self, grid, qapp):
-        grid.show()
-        qapp.processEvents()
-        grid.set_slots(_slots(4))
-        grid.set_view_mode('single')
-        grid.set_view_mode('all')
-        assert all(c.isVisibleTo(grid) for c in grid.cards())
-
-    def test_large_min_height_in_focus_modes(self, grid):
-        grid.set_slots(_slots(2))
-        grid.set_view_mode('single')
-        visible = [c for c in grid.cards() if c.isVisibleTo(grid)]
-        assert visible[0].minimumHeight() > 320   # 只有可见卡提档
-        grid.set_view_mode('all')
-        assert grid.cards()[0].minimumHeight() == 320
-
-    def test_selection_follows_in_single_mode(self, grid, qapp):
-        """single 模式下改选 → 可见卡跟着换（选中驱动）。"""
-        grid.show()
-        qapp.processEvents()
-        grid.set_slots(_slots(3))
-        grid.set_view_mode('single')
-        grid.set_selected('k0')
-        visible = [c.key for c in grid.cards() if c.isVisibleTo(grid)]
-        assert visible == ['k0']
-
-
-class TestSharedScale:
-    """统一色标：全组卡共用全局 [vmin, vmax]（display 层覆盖，raw 不动）。"""
-
-    def test_override_applies_global_range(self, grid):
-        grid.set_slots(_slots(2))
-        grid.set_bundle('k0', _bundle(0.5))    # 范围 0 ~ 0.5
-        grid.set_bundle('k1', _bundle(1.5))    # 范围 0 ~ 1.5
-        grid.set_shared_scale(True)
-        for card in grid.cards():
-            assert card.view._levels_override == (0.0, 1.5)
-        grid.set_shared_scale(False)
-        for card in grid.cards():
-            assert card.view._levels_override is None
-
-    def test_new_bundle_rescales_in_shared_mode(self, grid):
-        grid.set_slots(_slots(2))
-        grid.set_bundle('k0', _bundle(0.5))
-        grid.set_shared_scale(True)
-        grid.set_bundle('k1', _bundle(2.0))    # 新卡入组 → 全局范围扩大
-        for card in grid.cards():
-            assert card.view._levels_override == (0.0, 2.0)
-
-    def test_placeholder_card_skipped(self, grid):
-        grid.set_slots(_slots(2, disabled=(1,)))
-        grid.set_bundle('k0', _bundle(0.5))
-        grid.set_shared_scale(True)
-        assert grid.cards()[1].view is None    # 占位卡无视图，不崩
-
-
 class TestExplicitSourceOpening:
     """「全部步骤」开关：关=只铺输入 + 最终结果（P3 就地版）。"""
 
@@ -723,9 +472,6 @@ class TestExplicitSourceOpening:
         finally:
             page.close()
 
-    def test_grid_default_switch_on(self, grid):
-        assert grid._expand_switch.isChecked() is True
-
 
 class TestHistoricalTabsPreserved:
     """总览墙只显示当前上下文（真机反馈：跑一步蹦出一屏几天前的成果）。"""
@@ -769,83 +515,13 @@ class TestHistoricalTabsPreserved:
             page.select_artifact('OLD1')
             page.select_artifact('NEW1')
             assert len(page._workspace.views()) == 1
-            assert page.findChildren(ResultGrid) == []
             assert page._workspace.active_key() == 'artifact:NEW1'
         finally:
             page.close()
 
 
-class TestSingleViewGeometry:
-    """单步视图几何：可见卡必须占满结果区宽（真机反馈「只有半个窗口」）。
-
-    根因：QGridLayout 空列不自动回收 + 列 stretch 跨重排残留——
-    修：重排前清列拉伸 + 单步卡跨满最大列数（itemPos span=2）。
-    """
-
-    def test_visible_card_spans_full_width(self, grid, qapp):
-        grid.resize(900, 600)
-        grid.show()
-        qapp.processEvents()
-        qapp.processEvents()
-        grid.set_slots(_slots(2))
-        grid.set_selected('k0')
-        grid.set_view_mode('single')
-        qapp.processEvents()
-        qapp.processEvents()
-        visible = [c for c in grid.cards() if c.isVisibleTo(grid)]
-        assert [c.key for c in visible] == ['k0']
-        assert visible[0].width() >= 0.95 * grid._body.width()
-        idx = grid._grid.indexOf(visible[0])
-        assert grid._grid.getItemPosition(idx)[3] == 2   # columnSpan=2
-
-    def test_switch_back_to_all_two_columns(self, grid, qapp):
-        grid.resize(900, 600)
-        grid.show()
-        qapp.processEvents()
-        qapp.processEvents()
-        grid.set_slots(_slots(2))
-        grid.set_view_mode('single')
-        grid.set_view_mode('all')
-        qapp.processEvents()
-        qapp.processEvents()
-        assert grid._grid.columnStretch(0) == 1
-        assert grid._grid.columnStretch(1) == 1
-        widths = [c.width() for c in grid.cards()]
-        assert all(abs(w - widths[0]) <= 2 for w in widths)   # 均分
-
-
-class TestColorbarPrefOnGrid:
-    """设置页「显示色标」对 v2 结果网格生效（真机反馈开关失效）。
-
-    网格卡 with_colorbar=False 构造；偏好 True 下发 → 动态补建色标；
-    新建卡继承偏好状态。
-    """
-
-    def test_set_colorbar_visible_creates_colorbar(self, grid, qapp):
-        grid.set_slots(_slots(2))
-        grid.set_bundle('k0', _bundle(1))  # 色标量程只在有数据时显示
-        card = grid.cards()[0]
-        assert card.view._colorbar is None            # 初始无色标（窄卡）
-        card.view.set_colorbar_visible(True)
-        assert card.view._colorbar is not None        # 动态补建
-        assert card.view._colorbar.isVisible()
-        card.view.set_colorbar_visible(False)
-        assert not card.view._colorbar.isVisible()    # 再关=隐藏不销毁
-
-    def test_pref_broadcasts_to_cards(self, grid):
-        grid.set_slots(_slots(2))
-        grid.set_bundle('k0', _bundle(1))
-        grid.set_colorbar_pref(True)
-        states = [c.view._colorbar_visible for c in grid.cards()]
-        assert states == [True, True]
-        grid.set_colorbar_pref(False)
-        states = [c.view._colorbar_visible for c in grid.cards()]
-        assert states == [False, False]
-
-    def test_new_cards_inherit_pref(self, grid):
-        grid.set_colorbar_pref(True)
-        grid.set_slots(_slots(2))                     # 偏好 True 后新建
-        assert all(c.view._colorbar_visible for c in grid.cards())
+class TestColorbarPrefForwarding:
+    """设置页「显示色标」对 v2 处理页生效（真机反馈开关失效）。"""
 
     def test_page_forwards_pref_to_all_workspace_groups(self, qapp):
         page = ProcessingPage()
@@ -865,17 +541,6 @@ class TestAuditFixes20261009:
     入口/AutoTune 展开反馈/主题令牌/搜索无匹配浮层）。"""
 
     # ---------------- P1-A：「中间步骤」开关改名 ----------------
-    def test_expand_switch_renamed(self, qapp):
-        """结果区头部曾有两个「全部步骤」（视图模式项 + 开关）同名不同义。
-
-        开关改名「中间步骤」后与 segmented 的视图模式彻底区分。
-        """
-        grid = ResultGrid()
-        try:
-            assert grid._expand_switch.text == '中间步骤'
-            assert grid._scale_switch.text == '统一色标'
-        finally:
-            grid.deleteLater()
 
     # ---------------- P1-B：左栏卡序（执行卡上移） ----------------
     @staticmethod
@@ -1224,20 +889,6 @@ class TestDeepAudit20261009:
         finally:
             strip.deleteLater()
 
-    def test_switches_hidden_when_no_slots(self, qapp):
-        from ui.widgets.bscan_result_grid import ResultGrid
-        grid = ResultGrid()
-        try:
-            grid._expand_switch.setVisible(True)
-            grid._scale_switch.setVisible(True)
-            grid.set_slots([])
-            assert grid._expand_switch.isVisibleTo(grid) is False
-            assert grid._scale_switch.isVisibleTo(grid) is False
-            grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-            assert grid._expand_switch.isVisibleTo(grid) is True
-            assert grid._scale_switch.isVisibleTo(grid) is True
-        finally:
-            grid.deleteLater()
 
     def test_line_combo_placeholder(self, qapp):
         page = self._page_with_run()
@@ -1247,25 +898,6 @@ class TestDeepAudit20261009:
             page.close()
 
     # ---------------- 第三轮调研（✕ 对称 / 总览墙占位 / +N 渐隐） --------
-    def test_card_close_btn_hides_on_leave(self, qapp):
-        """enter 三显 / leave 三藏对称（原 leaveEvent 漏藏 ✕ → 扫过后常显）。"""
-        from PyQt6.QtCore import QEvent, QPointF
-        from PyQt6.QtGui import QEnterEvent
-
-        from ui.widgets.bscan_result_grid import ResultGrid
-        grid = ResultGrid()
-        try:
-            grid.set_slots([{'key': 'k0', 'title': '输入', 'enabled': True}])
-            card = grid.cards()[0]
-            pos = QPointF(1.0, 1.0)
-            card.enterEvent(QEnterEvent(pos, pos, pos))
-            assert card.close_btn.isVisibleTo(card) is True
-            card.leaveEvent(QEvent(QEvent.Type.Leave))
-            assert card.close_btn.isVisibleTo(card) is False
-            assert card.expand_btn.isVisibleTo(card) is False
-            assert card.compare_btn.isVisibleTo(card) is False
-        finally:
-            grid.deleteLater()
 
     def test_gallery_placeholder_for_missing_bundle(self, qapp):
         """bundle 未回填的源显示 muted 占位（原直接跳过 → pyqtgraph 空画布）。"""

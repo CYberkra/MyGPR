@@ -142,7 +142,7 @@ def focus_border(dark: bool | None = None) -> str:
     """键盘焦点环的描边（2px border_focus，WCAG 2.4.7 / 非文本 ≥3:1）。
 
     组件用 QSS ``#id:focus{border:2px solid <本值>}`` 挂载——Qt 的
-    ``outline`` 支持有限，直接用 border 更稳（见 _ResultCard._normal_qss）。
+    ``outline`` 支持有限，直接用 border 更稳（见 chain_strip._chip_qss）。
     """
     return color('border_focus', dark)
 
