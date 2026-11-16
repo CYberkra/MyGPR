@@ -46,7 +46,6 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
     cancel_requested = pyqtSignal()
     autotune_requested = pyqtSignal(str, dict, str)
     line_changed = pyqtSignal(str)
-    artifact_selected = pyqtSignal(str)
     artifact_preview_requested = pyqtSignal(str)
     original_preview_requested = pyqtSignal()
     artifact_delete_requested = pyqtSignal(str, list)

@@ -60,7 +60,6 @@ class ProjectChain:
         home.open_project_requested.connect(co.open_project_dialog)
         home.import_line_requested.connect(
             lambda: co.goto_page('projectInterface'))
-        home.goto_page.connect(co.goto_page)
         recent_signal = getattr(home, 'open_recent_project_requested', None)
         if hasattr(recent_signal, 'connect'):
             recent_signal.connect(self.on_open_recent_project)

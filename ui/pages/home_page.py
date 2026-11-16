@@ -25,7 +25,6 @@ class HomePage(ScrollArea):
     open_recent_project_requested = pyqtSignal(str)
     project_delete_requested = pyqtSignal(str)
     import_line_requested = pyqtSignal()
-    goto_page = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
