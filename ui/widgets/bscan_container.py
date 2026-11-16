@@ -49,7 +49,9 @@ _THUMB_STRETCH = 100 - _PRIMARY_STRETCH
 class BScanContainer(QWidget):
     """B-Scan 多面板容器：面板数切换 + 面板访问，不做数据路由。"""
 
-    sig_layout_changed = pyqtSignal(str)     # 面板数变化时发射（实体页名）
+    # 自动重排（resolve_auto）是数据驱动，不是用户偏好变化，因此**绝不发射**；
+    # tests/test_bscan_container.py::test_resolve_auto_does_not_emit_signal 钉住该契约。
+    sig_layout_changed = pyqtSignal(str)     # 仅保留给未来的手动布局入口
 
     def __init__(self, parent=None):
         super().__init__(parent)

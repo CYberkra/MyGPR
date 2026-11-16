@@ -57,8 +57,6 @@ class ProcessingChain:
         processing.cancel_requested.connect(self.on_processing_cancel)
         processing.autotune_requested.connect(self.on_autotune_requested)
         processing.line_changed.connect(self.on_processing_line_changed)
-        processing.artifact_selected.connect(
-            self.on_processing_artifact_selected)
         # tab 模型懒加载：可见面板缺 bundle → 按需预览（异步回填）
         processing.artifact_preview_requested.connect(
             self.on_step_preview_requested)
@@ -185,12 +183,6 @@ class ProcessingChain:
         if not self._co.project.on_line_selected(line_id):
             return
         self._co.infobar('info', '切换测线', f'已切换到 {line_id}')
-
-    def on_processing_artifact_selected(self, artifact_id: str) -> None:
-        """处理页成果下拉变化 → 预览所选处理结果。"""
-        line_id = self._co.require_line()
-        if line_id and artifact_id and self._co.project_controller is not None:
-            self._co.project_controller.preview_artifact(line_id, str(artifact_id))
 
     def on_original_focus_requested(self, line_id: str) -> None:
         if not self._co.project.on_line_selected(str(line_id)):
