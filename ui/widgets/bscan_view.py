@@ -619,6 +619,9 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
 
     # ------------------------------------------------------------------ 其它
     def _set_axes_visible(self, visible: bool) -> None:
+        # 缩略图模式下轴一律不画：set_matrix / _refresh_axis_state 会在数据
+        # 到达时无条件要求 True，不在这里拦就会被重新打开。
+        visible = visible and not self._thumbnail_mode
         for axis in ('bottom', 'left'):
             self._plot.showAxis(axis, visible)
         if self._colorbar is not None:

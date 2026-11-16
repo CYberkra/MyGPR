@@ -176,5 +176,11 @@ class FullscreenHost(QWidget):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
+        # 全屏中直接关窗不经过 collapse()，这里补一次几何回写。正常折叠时
+        # state 已是 'collapsing'，不会重复保存、也不会用嵌入尺寸覆盖好值。
+        if self.state in ('fullscreen', 'expanding'):
+            saver = self._geometry_saver
+            if saver is not None:
+                saver(self.saveGeometry())
         self.settle()
         event.accept()
