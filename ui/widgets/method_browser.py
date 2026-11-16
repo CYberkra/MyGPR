@@ -251,9 +251,6 @@ class MethodBrowser(QWidget):
         if mid:
             self.sig_add_requested.emit(mid)
 
-    def _on_context_menu(self, pos) -> None:
-        self._method_menu.show(pos)
-
     def _context_menu(self, pos):
         item = self._tree.itemAt(pos)
         mid = self._method_id_of(item)

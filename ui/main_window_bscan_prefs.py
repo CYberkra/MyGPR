@@ -107,7 +107,6 @@ class BScanPreferenceMixin:
         view.sig_gain_changed.connect(
             lambda mode: self._mirror_bscan_setting('bscan_gain_mode',
                                                     str(mode)))
-        view.sig_gain_params_changed.connect(self._mirror_bscan_tvg_params)
         view.sig_qc_marks_visible_changed.connect(self._on_qc_marks_visible_changed)
 
     def _open_bscan_settings(self, source=None) -> None:
@@ -255,13 +254,6 @@ class BScanPreferenceMixin:
         except (TypeError, ValueError):
             power = 1.0
         return min(max(db, 0.0), 60.0), min(max(power, 0.3), 3.0)
-
-    def _mirror_bscan_tvg_params(self, db: float, power: float) -> None:
-        values = {'bscan_tvg_db': float(db), 'bscan_tvg_power': float(power)}
-        for key, value in values.items():
-            self.settings.set(key, value)
-        self.settings.save()
-        self._sync_settings_page_bscan(values)
 
     def _persist_bscan_levels(self, low: float, high: float) -> None:
         """色阶两个键必须同一次写盘，否则中途崩溃会留下 low>high 的坏状态。"""

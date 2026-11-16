@@ -46,6 +46,7 @@ class ProcessingSteps:
     def _on_chain_step_toggled(self, index: int, enabled: bool) -> None:
         """启用/禁用：与当前状态不同才翻转（PipelineList 内置翻转语义）。"""
         if not self._can_edit_chain():
+            self._refuse_chain_edit()
             return
         steps = self._pipeline_list.steps()
         if 0 <= index < len(steps) and steps[index]['enabled'] != enabled:
@@ -53,6 +54,7 @@ class ProcessingSteps:
 
     def _on_chain_step_removed(self, index: int) -> None:
         if not self._can_edit_chain():
+            self._refuse_chain_edit()
             return
         self._step_edits.pop(self._pipeline_list.step_uid(index), None)
         self._pipeline_list._remove_step(index)
@@ -60,6 +62,7 @@ class ProcessingSteps:
     def _on_chain_step_moved(self, source: int, target: int) -> None:
         """chip 拖拽落点 → 步骤换位（target 为插入位语义）。"""
         if not self._can_edit_chain():
+            self._refuse_chain_edit()
             return
         self._pipeline_list._move_step_to(source, target)
 

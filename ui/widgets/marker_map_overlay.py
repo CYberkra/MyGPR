@@ -74,3 +74,15 @@ class MarkerMapOverlay(QObject):
             self.view._plot.vb.setRange(xRange=(np.nanmin(xs) - 2, np.nanmax(xs) + 2),
                                        yRange=(np.nanmin(ys) - 2, np.nanmax(ys) + 2), padding=.05)
         return bool(segments)
+
+    def apply_theme(self, dark: bool) -> None:
+        """主题切换重刷墨色。
+
+        本对象是 QObject（不在主窗 ``findChildren(QWidget)`` 遍历内），
+        颜色又只在 ``set_rows``/``select`` 时固化，因此必须由页面显式转发。
+        """
+        ink = color('primary', dark)
+        self._line.setPen(pg.mkPen(ink, width=2))
+        self._points.setBrush(pg.mkBrush(ink))
+        self._points.setPen(pg.mkPen(ink))
+        self._highlight.setPen(pg.mkPen(color('warning', dark), width=4))

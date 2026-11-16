@@ -77,6 +77,11 @@ class ProcessingSidebar:
                     and not self._draft_locked() and not self._project_read_only
                     and not self._comparison.active)
 
+    def _refuse_chain_edit(self):
+        """拒绝编辑时给出可见原因：只读/对比/源版本刷新中都不是死控件。"""
+        self._step_feedback.setText('当前状态不可编辑处理链（只读 / 对比模式 / 源版本刷新中）')
+        self._sync_step_tools()
+
     def _reset_step_tools(self):
         self._close_gain_previews()
         self._picker_context = None
@@ -90,6 +95,7 @@ class ProcessingSidebar:
 
     def _open_method_picker(self, purpose='append', index=-1):
         if not self._can_edit_chain():
+            self._refuse_chain_edit()
             return
         replacing = purpose == 'replace'
         if replacing and not self._pipeline_list.step_uid(index):

@@ -602,6 +602,8 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         self._profile_view.apply_theme(dark)
         self._3d_view.apply_theme(dark)
         self._depth_view.apply_theme(dark)
+        if hasattr(self, '_marker_overlay'):
+            self._marker_overlay.apply_theme(dark)
         # 主题切换会重建视图内部条目，指纹作废：下次刷新必须重新灌数据
         self._views_applied.clear()
         # 空态 hint 颜色由 HintLabel.apply_theme 随主题自刷，无需手工重设
