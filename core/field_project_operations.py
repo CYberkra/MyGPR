@@ -176,18 +176,6 @@ class ProjectDeletePreflight:
     external_source_count: int
     missing_recent_count: int = 0
 
-    def to_lines(self) -> list[str]:
-        return [
-            f"项目名称：{self.project_name}",
-            f"项目路径：{self.project_path}",
-            f"项目大小：{self.size_mb:.2f} MB",
-            f"文件数量：{self.file_count}",
-            f"测线数量：{self.line_count}",
-            f"处理结果：{self.processed_count}",
-            f"报告文件：{self.report_file_count}",
-            f"外部源文件：{self.external_source_count} 个，不会删除",
-        ]
-
 
 @dataclass
 class RecentProjectRecord:

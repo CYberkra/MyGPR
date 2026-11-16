@@ -34,10 +34,6 @@ class TargetSourceBinding:
     input_shape: tuple[int, ...] = ()
     output_shape: tuple[int, ...] = ()
 
-    @property
-    def is_axis_transform(self) -> bool:
-        return bool(self.axis_transform) or self.artifact_role == "display_compare_transform"
-
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["input_shape"] = list(self.input_shape)

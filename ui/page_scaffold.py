@@ -216,9 +216,6 @@ class HintLabel(CaptionLabel):
         self._hint_key = str(key)
         self.setStyleSheet(hint_qss(self._hint_key))
 
-    def hint_key(self) -> str:
-        return self._hint_key
-
     def apply_theme(self, dark: bool) -> None:
         """主题切换重刷（主窗口全量遍历鸭子类型调用）。"""
         self.setStyleSheet(hint_qss(self._hint_key))
@@ -354,14 +351,6 @@ class PanelStateMixin:
     def panel_states(self) -> dict:
         """当前实际存在的侧栏折叠状态。"""
         return {side: panel.is_collapsed() for side, panel in self._panel_sides()}
-
-    def set_panel_collapsed(self, *, left: bool = None, right: bool = None,
-                            animate: bool = True) -> None:
-        """设置左右面板折叠状态，单侧栏页面可只提供一侧。"""
-        if left is not None and getattr(self, '_left_panel', None) is not None:
-            self._left_panel.set_collapsed(bool(left), animate=animate)
-        if right is not None and getattr(self, '_right_panel', None) is not None:
-            self._right_panel.set_collapsed(bool(right), animate=animate)
 
     # ------------------------------------------------------------ 窄窗自动折叠
     def resizeEvent(self, event) -> None:

@@ -34,10 +34,6 @@ class CancellationToken:
         if self.is_cancelled:
             raise JobCancelledError("job cancelled")
 
-    def as_checker(self):
-        """Return the legacy ``Callable[[], bool]`` cancellation shape."""
-        return lambda: self.is_cancelled
-
 
 class CancellationTokenSource:
     """Owner capable of requesting cancellation."""

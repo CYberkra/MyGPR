@@ -21,10 +21,6 @@ class TimeRangeSelection:
     end_idx: int
     source: str
 
-    @property
-    def is_full_range(self) -> bool:
-        return self.start_idx == 0 and self.source == "full"
-
 
 def resolve_time_range_selection(
     data_shape: tuple[int, int],

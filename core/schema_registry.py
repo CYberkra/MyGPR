@@ -77,9 +77,6 @@ class SchemaRegistry:
         except KeyError as exc:
             raise UnsupportedSchemaError(f"Unregistered schema family: {family}") from exc
 
-    def families(self) -> tuple[str, ...]:
-        return tuple(sorted(self._definitions))
-
     @staticmethod
     def parse(schema: str) -> tuple[str, int]:
         match = _SCHEMA_RE.match(str(schema or ""))
