@@ -690,10 +690,6 @@ def batch_import_line_data(
 
 
 
-def _safe_timestamp_for_path() -> str:
-    return local_now().replace(":", "-").replace(" ", "_")
-
-
 def _unique_destination(path: Path) -> Path:
     if not path.exists():
         return path

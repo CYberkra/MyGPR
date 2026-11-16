@@ -526,10 +526,6 @@ class ResultGrid(QWidget):
         for col in range(cols):
             self._grid.setColumnStretch(col, 1)
 
-    def _reflow(self) -> None:
-        """兼容旧入口：差量更新后统一走视图模式重排。"""
-        self._apply_view_mode()
-
     # ------------------------------------------------------------ 统一色标
     def set_colorbar_pref(self, visible: bool) -> None:
         """色标显隐偏好（设置页下发）：广播到现有卡，新建卡继承。"""

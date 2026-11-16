@@ -460,10 +460,3 @@ class PanelStateMixin:
             return
         sm.set(key, value)
         sm.save()
-
-    def _restore_setting(self, key: str, default=None):
-        """读单个设置项；未注入时返回 default（不读盘）。"""
-        sm = self._sm
-        if sm is None:
-            return default
-        return sm.get(key, default)

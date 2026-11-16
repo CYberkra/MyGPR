@@ -894,11 +894,6 @@ class MapView(GraphicsViewBase, pg.GraphicsLayoutWidget):
                    lambda: self.export_png(prefix='map'))
         show_menu(menu, position if position is not None else self.mapToGlobal(self.rect().center()))
 
-    def _copy_center_lonlat(self) -> None:
-        """视图中心 → WGS84 经纬度（'纬度,经度'，便于粘贴到奥维等软件对照）。"""
-        center = self._plot.vb.viewRect().center()
-        QApplication.clipboard().setText(self._lonlat_text(center))
-
     def _lonlat_text(self, point):
         lon, lat = mercator_to_lonlat(point.x(), point.y())
         if is_gcj02_source(self._layer.source_key()):
