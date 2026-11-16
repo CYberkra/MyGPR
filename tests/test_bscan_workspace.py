@@ -408,24 +408,30 @@ def test_split_group_display_and_fit_buttons_target_only_their_own_view(workspac
     assert opened == [second]
 
 
-def test_acquisition_marker_button_layout_availability_and_toggle(workspace, qapp):
+def test_acquisition_marker_menu_layout_and_toggle(workspace, qapp, monkeypatch):
     group = workspace.group_widget(workspace.group_ids()[0])
     header = group.display_settings.parentWidget().layout().itemAt(0).layout()
     assert header.indexOf(group.marker_menu) == header.indexOf(group.display_settings) - 1
     qapp.processEvents()
     assert group.marker_menu.geometry().center().y() == group.display_settings.geometry().center().y()
-    assert not group.markers_visibility.isEnabled()
-    workspace.set_sources([dict(key='A', title='A', bundle=bundle())])
-    workspace.open_source('A')
-    assert not group.markers_visibility.isEnabled()
     marked_bundle = bundle(acquisition_markers=({'trace_no': 2, 'marker_type': 'general'},))
     workspace.set_sources([dict(key='A', title='A', bundle=marked_bundle)])
     workspace.open_source('A')
-    assert group.markers_visibility.isEnabled()
     assert group.view.acquisition_markers_shown()
-    group.markers_visibility.click()
+
+    captured = []
+    from ui.widgets import marker_workspace_tools
+    monkeypatch.setattr(marker_workspace_tools, 'show_menu',
+                        lambda menu, position: captured.append(menu))
+    group.marker_menu.click()
+    visibility = next(a for a in captured[-1].actions() if a.text() == '显示图上标记')
+    assert visibility.isChecked()
+    visibility.trigger()
     assert not group.view.acquisition_markers_shown()
-    group.markers_visibility.click()
+    group.marker_menu.click()
+    visibility = next(a for a in captured[-1].actions() if a.text() == '显示图上标记')
+    assert not visibility.isChecked()
+    visibility.trigger()
     assert group.view.acquisition_markers_shown()
 
 
@@ -442,20 +448,31 @@ def test_compact_group_keeps_display_and_fit_commands_reachable(workspace):
     menu.deleteLater()
 
 
-def test_split_groups_toggle_acquisition_markers_independently(workspace):
+def test_split_groups_toggle_acquisition_markers_independently(workspace, monkeypatch):
     marked_bundle = bundle(acquisition_markers=({'trace_no': 2, 'marker_type': 'general'},))
     workspace.set_sources([dict(key='A', title='A', bundle=marked_bundle)])
     workspace.open_source('A')
     workspace.split_source('A', 'right', copy=True)
     first, second = (workspace.group_widget(group_id) for group_id in workspace.group_ids())
-    assert first.markers_visibility.isEnabled() and second.markers_visibility.isEnabled()
-    first.markers_visibility.click()
+    assert first.view.acquisition_markers_shown() and second.view.acquisition_markers_shown()
+
+    captured = []
+    from ui.widgets import marker_workspace_tools
+    monkeypatch.setattr(marker_workspace_tools, 'show_menu',
+                        lambda menu, position: captured.append(menu))
+
+    def toggle(group):
+        group.marker_menu.click()
+        visibility = next(a for a in captured[-1].actions() if a.text() == '显示图上标记')
+        visibility.trigger()
+
+    toggle(first)
     assert not first.view.acquisition_markers_shown()
     assert second.view.acquisition_markers_shown()
-    second.markers_visibility.click()
+    toggle(second)
     assert not first.view.acquisition_markers_shown()
     assert not second.view.acquisition_markers_shown()
-    second.markers_visibility.click()
+    toggle(second)
     assert not first.view.acquisition_markers_shown()
     assert second.view.acquisition_markers_shown()
 

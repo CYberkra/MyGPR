@@ -10,7 +10,6 @@ from ui.desktop_backend_facade import marker_rows_for_view, export_marker_views
 class MarkerController(QObject):
     ready = pyqtSignal(str, object, str)
     changed = pyqtSignal(object)
-    job_submitted = pyqtSignal(str)
     artifact_saved = pyqtSignal(str, str)
     _completed = pyqtSignal(str, object, object, str)
 
@@ -45,7 +44,6 @@ class MarkerController(QObject):
                     self.artifact_saved.emit(project_id, line_id)
             bridge.job_completed.connect(finished)
             bridge.watch(job_id, title='事件区间处理')
-            self.job_submitted.emit(job_id)
         self.ready.emit(payload['token'], result, error)
 
 

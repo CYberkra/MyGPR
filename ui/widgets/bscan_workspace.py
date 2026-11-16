@@ -63,13 +63,6 @@ class _ViewGroup(QWidget):
         self.more.setFixedSize(28, 28)
         self.more.setToolTip('视图组操作')
         self.more.setAccessibleName('视图组操作')
-        self.markers_visibility = TransparentToolButton(FIF.VIEW, self)
-        self.markers_visibility.setFixedSize(*constants.TOOL_BTN_SIZE)
-        self.markers_visibility.setCheckable(True)
-        self.markers_visibility.setChecked(True)
-        self.markers_visibility.setEnabled(False)
-        self.markers_visibility.setToolTip('显示或隐藏图上标记')
-        self.markers_visibility.setAccessibleName('显示图上标记')
         self.display_settings = TransparentToolButton(FIF.SETTING, self)
         self.display_settings.setFixedSize(*constants.TOOL_BTN_SIZE)
         self.display_settings.setToolTip('当前视图显示设置')
@@ -91,9 +84,6 @@ class _ViewGroup(QWidget):
         header.addWidget(self.more)
         self.view = BScanView(self)
         self.view.set_title_visible(False)
-        self.markers_visibility.toggled.connect(self.view.set_acquisition_markers_visible)
-        self.view.sig_acquisition_markers_availability_changed.connect(
-            self.markers_visibility.setEnabled)
         self.display_settings.clicked.connect(lambda: self.view.show_display_menu(
             self.display_settings.mapToGlobal(self.display_settings.rect().bottomLeft())))
         self.fit_view.clicked.connect(lambda: self.view.fit_all())

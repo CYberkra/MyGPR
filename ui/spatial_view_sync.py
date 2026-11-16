@@ -40,7 +40,10 @@ class ViewSyncMixin:
             return
         self._closed = True
         self._dem_load_generation += 1
-        self._dem_load_signals.finished.disconnect(self._on_dem_loaded)
+        try:
+            self._dem_load_signals.finished.disconnect(self._on_dem_loaded)
+        except (RuntimeError, TypeError):
+            pass
         self._map_view.shutdown()
         self._3d_view.shutdown()
         self._dem_pool.clear()
