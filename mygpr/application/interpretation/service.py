@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 import numpy as np
 
@@ -68,12 +68,6 @@ class InterpretationService:
 
     def add_point(self, project_id: str, line_id: str, *, trace: float, sample: float, confidence: float, label: str = "解释点", result_id: str = "", properties: Mapping[str, Any] | None = None) -> InterpretationFeature:
         return self._add(project_id, line_id, feature_type="point", geometry={"type": "Point", "coordinates": [float(trace), float(sample)]}, confidence=confidence, label=label, result_id=result_id, properties=properties)
-
-    def add_interface(self, project_id: str, line_id: str, *, points: Sequence[tuple[float, float]], confidence: float, label: str = "基覆界面", result_id: str = "", properties: Mapping[str, Any] | None = None) -> InterpretationFeature:
-        coords = [[float(x), float(y)] for x, y in points]
-        if len(coords) < 2:
-            raise ValueError("界面线至少需要两个点")
-        return self._add(project_id, line_id, feature_type="interface_line", geometry={"type": "LineString", "coordinates": coords}, confidence=confidence, label=label, result_id=result_id, properties=properties)
 
     def add_zone(self, project_id: str, line_id: str, *, trace_start: float, trace_end: float, sample_start: float, sample_end: float, confidence: float, label: str = "解释区间", properties: Mapping[str, Any] | None = None) -> InterpretationFeature:
         x0, x1 = sorted((float(trace_start), float(trace_end)))

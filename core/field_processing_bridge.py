@@ -233,24 +233,6 @@ class FieldMethodCompatibilityRecord:
             return "道数有变化"
         return "通过"
 
-    def to_report_row(self) -> dict[str, Any]:
-        return {
-            "method_id": self.method_id,
-            "method_name": self.method_name,
-            "category": self.category,
-            "params_ok": self.params_ok,
-            "execution_ok": self.execution_ok,
-            "input_shape": list(self.input_shape),
-            "output_shape": list(self.output_shape) if self.output_shape else None,
-            "sample_count_preserved": self.sample_count_preserved,
-            "trace_count_preserved": self.trace_count_preserved,
-            "finite_output": self.finite_output,
-            "elapsed_s": round(float(self.elapsed_s), 4),
-            "status": self.status,
-            "warning_count": self.warning_count,
-            "error": self.error,
-        }
-
 
 def _strip_registry_prefix(name: str) -> str:
     text = str(name).strip()

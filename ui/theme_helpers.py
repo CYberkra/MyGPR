@@ -254,11 +254,6 @@ BADGE_QSS = _BADGE_QSS_BODY + 'color: #ffffff; background-color: %s; }'
 BADGE_QSS_PAIR = _BADGE_QSS_BODY + 'color: %s; background-color: %s; }'
 
 
-def badge_qss(bg: str) -> str:
-    """药丸徽章样式（白字 + 指定实色底，单占位模板）。"""
-    return BADGE_QSS % bg
-
-
 def badge_qss_pair(text_color: str, bg: str) -> str:
     """药丸徽章样式（彩字淡底变体，配 badge_colors() 色对）。"""
     return BADGE_QSS_PAIR % (text_color, bg)

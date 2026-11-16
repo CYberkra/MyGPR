@@ -201,12 +201,6 @@ class DepthSliceView(GraphicsViewBase, pg.PlotWidget):
         self._isocurve.level = float(value)
         self._rebuild_isoline()
 
-    def isoline_value(self) -> float | None:
-        """当前等值线 level；未设网格时 None。"""
-        if self._matrix is None:
-            return None
-        return float(self._isocurve.level)
-
     # ------------------------------------------------------------ 轨迹
     def set_tracks(self, tracks, colors: dict) -> None:
         """叠加选中测线轨迹点（与 ElevationProfileView 同一勾选数据源）。

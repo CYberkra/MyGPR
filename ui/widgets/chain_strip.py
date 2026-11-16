@@ -298,7 +298,6 @@ class ChainStrip(QWidget):
         self._display_generation = 0
         self._context = object()
         self._overflow_menus = []
-        self._input_widget = None
         self._list = _ChipList(self, self)
         self._list.setFlow(QListWidget.Flow.LeftToRight)
         self._list.setWrapping(False)
@@ -533,18 +532,6 @@ class ChainStrip(QWidget):
         self._flash_timer.start(1200)
 
     # ---------------------------------------------------------------- 数据
-    def set_input_widget(self, widget) -> None:
-        """条首承载「输入」选择（测线 / 成果下拉）——不单独占一行纵向。"""
-        if widget is self._input_widget:
-            return
-        if self._input_widget is not None:
-            self.layout().removeWidget(self._input_widget)
-            self._input_widget.hide()
-        self._input_widget = widget
-        if widget is None:
-            return
-        self.layout().insertWidget(0, widget)
-
     def set_context(self, context) -> None:
         """Bind gestures to an opaque host draft identity without rebuilding chips."""
         if context == self._context:

@@ -193,41 +193,6 @@ class ProcessingWorkbenchService:
             self._sessions[fork.session_id] = fork
         return self._snapshot(fork)
 
-    def preview_method(
-        self,
-        session_id: str,
-        method_id: str,
-        params: dict[str, Any] | None = None,
-        *,
-        max_samples: int = 900,
-        max_traces: int = 1800,
-    ) -> WorkbenchPreview:
-        session = self._session(session_id)
-        result = self._execute(session, method_id, params or {})
-        return self._preview(
-            session.session_id,
-            method_id,
-            dict(result.params),
-            result.data,
-            result.metadata,
-            max_samples=max_samples,
-            max_traces=max_traces,
-        )
-
-    def session_window(
-        self, session_id: str, *, max_samples: int = 900, max_traces: int = 1800
-    ) -> WorkbenchPreview:
-        session = self._session(session_id)
-        return self._preview(
-            session.session_id,
-            "session",
-            {},
-            session.current_data,
-            {"step_count": len(session.steps), "revision": session.revision},
-            max_samples=max_samples,
-            max_traces=max_traces,
-        )
-
     def append_step(
         self, session_id: str, method_id: str, params: dict[str, Any] | None = None, *, label: str = ""
     ) -> WorkbenchSessionSnapshot:
