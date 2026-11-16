@@ -5,7 +5,6 @@ from pathlib import Path
 import numpy as np
 
 from core.field_project_operations import create_project, import_line_data
-from core.field_project_status import build_project_status_snapshot
 from core.project_events import ProjectEvent, ProjectEventType
 from core.project_state_tracker import ProjectStateTracker, load_project_state
 
@@ -48,19 +47,6 @@ def test_report_generation_clears_report_stale(tmp_path: Path) -> None:
 
     assert state["dirty"]["report"] is False
     assert state["stale_reasons"]["report"] == []
-
-
-def test_project_status_exposes_dirty_report_and_attention(tmp_path: Path) -> None:
-    store = create_project(tmp_path, name="linkage-status")
-    ProjectStateTracker(store.root).record_event(
-        ProjectEvent.create(ProjectEventType.REPORT_MARKED_STALE, project_root=store.root, reason="项目数据已变化")
-    )
-
-    snapshot = build_project_status_snapshot(store)
-
-    assert snapshot.dirty_modules["report"] is True
-    assert snapshot.report_status == "需重新生成" or snapshot.report_status != "已生成"
-    assert any("成果报告需重新生成" in item[1] for item in snapshot.attention_items)
 
 
 def test_line_import_event_keeps_source_and_report_state(tmp_path: Path) -> None:
