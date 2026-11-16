@@ -507,6 +507,18 @@ class TestHistoricalTabsPreserved:
         finally:
             page.close()
 
+    def test_multiple_historical_results_do_not_open_gallery_or_auto_split(self, qapp):
+        page = ProcessingPage()
+        try:
+            page.set_original_bundle(_bundle(1))
+            page.set_artifacts(self._artifacts())
+            page.select_artifact('OLD1')
+            page.select_artifact('NEW1')
+            assert len(page._workspace.views()) == 1
+            assert page._workspace.active_key() == 'artifact:NEW1'
+        finally:
+            page.close()
+
 
 class TestColorbarPrefForwarding:
     """设置页「显示色标」对 v2 处理页生效（真机反馈开关失效）。"""
