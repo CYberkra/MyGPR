@@ -151,7 +151,11 @@ def _plot_trajectory(ax, trajectory, line_id, project_crs, ranges, highlighted):
 
 def _draw_gis_layer(ax, gis_store, layer, project_crs, bounds_x, bounds_y, cancel_requested):
     if layer.kind == "raster":
-        preview = gis_store.load_raster_preview(layer, max_size=2400, target_crs=project_crs)
+        try:
+            preview = gis_store.load_raster_preview_cached(layer, max_size=2400, target_crs=project_crs)
+        except OSError:
+            # 只读项目/缓存目录不可写时退回直读，导出不因缓存失败而中断
+            preview = gis_store.load_raster_preview(layer, max_size=2400, target_crs=project_crs)
         ax.imshow(
             preview.array,
             extent=preview.extent,

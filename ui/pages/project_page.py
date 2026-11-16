@@ -441,8 +441,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, ProjectDataForm
             self.line_name_edit.clear()
             self.line_id_edit.setText('L01')
             self._suggested_line_id = 'L01'
-            for edit in self._sensor_edits.values():
-                edit.clear()
+            self._sync_form.clear_paths()
             self.set_lines([])
         self.startup.set_current_project(summary)
         if summary is None:
@@ -625,8 +624,7 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, ProjectDataForm
         if self._sensor_target_line_id != self._current_line_id:
             self._sensor_target_line_id = self._current_line_id
             self._sync_dialog.close()
-            for edit in self._sensor_edits.values():
-                edit.clear()
+            self._sync_form.clear_paths()
         state = self.workspace_state()
         self._state_stack.setCurrentWidget(self.startup if state == 'startup' else self._work_widget)
         self._work_stack.setCurrentWidget(self._ledger_widget if state == 'ledger' else self._empty_project)

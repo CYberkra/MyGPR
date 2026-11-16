@@ -68,6 +68,7 @@ class _GalleryCard(QWidget):
         canvas_layout.setContentsMargins(0, 0, 0, 0)
         self._view = BScanView(self._canvas, with_colorbar=False)
         self._view.set_title_visible(False)     # 卡头已是唯一信息源
+        self._view.set_thumbnail_mode(True)     # 缩略图墙：不画轴、不挂全屏钮
         canvas_layout.addWidget(self._view, 1)
         body.addWidget(self._canvas, 1)
         # 名称（卡底，常显）
