@@ -144,32 +144,6 @@ def _sanitize_int_candidates(
     return cleaned
 
 
-def _adaptive_trace_windows(
-    n_traces: int,
-    configured_values: list[Any],
-    base_value: Any | None,
-    minimum: int,
-    upper: int,
-) -> list[int]:
-    """Build trace-window candidates using configured values plus data-adaptive ratios."""
-    ratio_values = [0.02, 0.03, 0.05, 0.08, 0.12, 0.2, 0.35, 0.5, 0.8]
-    adaptive = [max(minimum, int(round(n_traces * ratio))) for ratio in ratio_values]
-    if base_value is not None:
-        base_int = to_int_or_none(base_value)
-        if base_int is not None:
-            adaptive.extend(
-                [max(minimum, base_int - 20), base_int, min(upper, base_int + 20)]
-            )
-
-    values = _sanitize_int_candidates(
-        list(configured_values) + adaptive,
-        n_traces,
-        minimum=minimum,
-        upper=upper,
-    )
-    return values
-
-
 def _sanitize_float_candidates(values: list[Any], minimum: float) -> list[float]:
     cleaned: list[float] = []
     for value in values:

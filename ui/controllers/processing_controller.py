@@ -54,15 +54,6 @@ class _GainInputCommand:
             self.signals.ready.emit(self.token, payload, error)
 
 
-def _schema_to_list(parameter_schema: Mapping[str, Any]) -> list[dict]:
-    params: list[dict] = []
-    for key, item in dict(parameter_schema or {}).items():
-        entry = dict(item) if isinstance(item, Mapping) else {"name": str(key)}
-        entry.setdefault("name", str(key))
-        params.append(entry)
-    return params
-
-
 def build_method_dicts(entries: tuple[UiMethodEntry, ...]) -> list[dict]:
     """Convert facade method catalog entries to the list-of-dicts shape the UI expects."""
     items: list[dict] = []

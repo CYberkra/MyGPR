@@ -16,7 +16,6 @@ from qfluentwidgets import InfoBar
 from ui.desktop_backend_facade import compute_display_levels, compute_display_envelope
 from ui.widgets._colormap_data import COLORMAP_DATA
 from ui.widgets.bscan_axes import build_elevation_view
-from ui.widgets.bscan_levels_dialog import LevelsDialog
 from ui.widgets.bscan_view_interaction import BScanDisplayMode
 
 # 色标缓存：名 → ColorMap（数据查表重建，进程内只构建一次）
@@ -604,16 +603,6 @@ class BScanViewDataMixin:
             self._colorbar.setVisible(visible and self._matrix is not None)
         if notify:
             self.sig_colorbar_visible_changed.emit(visible)
-
-    def _edit_levels(self) -> None:
-        """右键「色阶设置…」：弹窗取低/高百分位后应用。"""
-        dialog = LevelsDialog(self.window(), self._p_low, self._p_high)
-        if dialog.exec() != LevelsDialog.DialogCode.Accepted:
-            return
-        chosen = dialog.percentiles()
-        if chosen is None:
-            return
-        self.set_display_levels(*chosen, notify=True)
 
     def _choose_colormap(self, name: str) -> None:
         """右键菜单选色标：应用到本视图并发信号让页面同步控件。"""

@@ -55,20 +55,6 @@ def _configure_matplotlib_cjk_fonts(matplotlib_module: Any) -> None:
     _MATPLOTLIB_CJK_CONFIGURED = True
 
 
-def _as_float_array(values: Any) -> np.ndarray:
-    arr = np.asarray(values, dtype=np.float64)
-    if arr.ndim != 1:
-        raise ValueError("trace metadata fields must be one-dimensional")
-    return arr
-
-
-def _as_int_array(values: Any) -> np.ndarray:
-    arr = np.asarray(values, dtype=np.int32)
-    if arr.ndim != 1:
-        raise ValueError("trace metadata fields must be one-dimensional")
-    return arr
-
-
 def _first_existing_1d(metadata: dict[str, Any], keys: tuple[str, ...]) -> np.ndarray | None:
     for key in keys:
         if key in metadata:

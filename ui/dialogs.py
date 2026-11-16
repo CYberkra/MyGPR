@@ -189,17 +189,6 @@ def choose_spatial_export_path(parent: QWidget | None, result_id: str) -> tuple[
     return path, suffix
 
 
-def ask_spatial_delete(parent: QWidget | None, result_id: str) -> bool:
-    box = MessageBox(
-        "移除空间成果",
-        f"将把空间成果 {result_id} 永久删除；原始导入源文件保留。",
-        parent.window() if parent is not None else None,
-    )
-    box.yesButton.setText("永久删除")
-    box.cancelButton.setText("取消")
-    return box.exec() == 1
-
-
 def ask_discard_interpretation(parent: QWidget | None, line_id: str) -> bool:
     """Discard only after explicit consent; cancelling keeps the edit session."""
     box = MessageBox(

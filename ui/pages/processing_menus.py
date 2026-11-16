@@ -15,10 +15,6 @@ from ui.result_presentation import describe_artifact
 class ProcessingMenus:
     """Shared page state remains owned by ProcessingPage; public methods stay inherited."""
 
-    def _tree_context(self, tree, pos):
-        binding = self._history_menu_binding if tree is self._history_tree else self._lineage_menu_binding
-        binding.show(pos)
-
     def _tree_menu(self, tree, pos):
         item = tree.itemAt(pos)
         if item is None:
