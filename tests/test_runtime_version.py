@@ -7,7 +7,7 @@ import pytest
 
 @pytest.fixture(params=[
     ("core.field_report_export", "_software_version", "core/field_report_export.py"),
-    ("ui.pages.settings_page", "_read_version", "ui/pages/settings_page.py"),
+    ("ui.settings_support", "read_application_version", "ui/settings_support.py"),
 ])
 def version_reader(request, tmp_path, monkeypatch):
     name, function, relative = request.param

@@ -5,7 +5,7 @@ from __future__ import annotations
 import platform
 import re
 import sys
-from importlib.metadata import PackageNotFoundError, version
+from importlib import metadata
 from pathlib import Path
 
 from PyQt6.QtCore import QT_VERSION_STR
@@ -42,8 +42,8 @@ def read_application_version() -> str:
     except OSError:
         pass
     try:
-        return version('mygpr')
-    except PackageNotFoundError:
+        return metadata.version('mygpr')
+    except metadata.PackageNotFoundError:
         return 'unknown'
 
 
