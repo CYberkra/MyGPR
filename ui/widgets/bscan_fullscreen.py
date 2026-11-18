@@ -146,6 +146,11 @@ class FullscreenHost(QWidget):
     def captured_geometry(self) -> QByteArray:
         return self.saveGeometry()
 
+    def discard_pending_geometry(self) -> None:
+        """布局复位后仍保留当前全屏位置，退出时不重新记忆这一轮位置。"""
+        if self.state in ('fullscreen', 'expanding'):
+            self._geometry_saver = None
+
     def restore_saved_geometry(self, data: QByteArray | bytes | None) -> bool:
         if data is None:
             return False

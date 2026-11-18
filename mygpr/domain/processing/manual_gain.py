@@ -48,6 +48,13 @@ def encode_gain_nodes(value: Any = None) -> str:
     return json.dumps(normalize_gain_nodes(value), ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
+def manual_gain_factors(positions: np.ndarray, value: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Interpolate in dB at normalized positions and return amplitude factors and dB."""
+    nodes = normalize_gain_nodes(value)
+    db = np.interp(positions, [node["tau"] for node in nodes], [node["db"] for node in nodes])
+    return np.power(10.0, db / 20.0), db
+
+
 def apply_manual_gain_curve(data: Any, value: Any = None) -> tuple[np.ndarray, np.ndarray, list[dict[str, Any]]]:
     """Shared normalization and amplitude rule for processing and live preview."""
     array = np.asarray(data, dtype=np.float64)
@@ -60,10 +67,9 @@ def apply_manual_gain_curve(data: Any, value: Any = None) -> tuple[np.ndarray, n
         array = np.nan_to_num(array, nan=fill, posinf=fill, neginf=fill)
         warnings.append({"code": "data_sanitized", "message": "输入数据包含 NaN/Inf，已使用均值填充。",
                          "method_id": "manual_gain", "fill_value": fill})
-    nodes = normalize_gain_nodes(value)
     positions = np.linspace(0.0, 1.0, array.shape[0])
-    db = np.interp(positions, [node["tau"] for node in nodes], [node["db"] for node in nodes])
-    result = array * np.power(10.0, db / 20.0)[:, None]
+    factors, db = manual_gain_factors(positions, value)
+    result = array * factors[:, None]
     if not np.isfinite(result).all() or np.any(np.abs(result) > np.finfo(np.float32).max):
         raise ValueError("手动曲线增益结果超出 float32 范围，请降低增益")
     return result.astype(np.float32), db, warnings

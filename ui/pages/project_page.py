@@ -177,6 +177,8 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, ProjectDataForm
         self._work_stack.addWidget(self._ledger_widget)
         self._import_dialog = self._tool_dialog('导入测线', self._build_import_card)
         self._import_dialog.resize(620, 415)
+        self._pending_import_dielectric = None
+        self._import_dialog.finished.connect(self._apply_pending_import_dielectric)
         self._sync_dialog = self._tool_dialog('传感器同步', self._build_sync_card)
         self._sync_dialog.setMinimumWidth(560)
         self._sync_dialog.resize(640, 375)
@@ -209,6 +211,8 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, ProjectDataForm
     def show_import_tool(self) -> None:
         if not self._has_project() or self._busy:
             return
+        if not self._import_dialog.isVisible():
+            self._apply_pending_import_dielectric()
         self._import_dialog.show()
         self._import_dialog.raise_()
         self.file_edit.setFocus()
@@ -610,11 +614,20 @@ class ProjectPage(ProjectLineContextMixin, ProjectDeliveryMixin, ProjectDataForm
         self._update_action_state()
 
     def set_default_dielectric(self, value) -> None:
-        """设置默认介电常数（导入表单默认值，来自设置页）。"""
+        """更新后续导入的默认值，保留已经打开的表单。"""
         try:
-            self.dielectric_spin.setValue(float(value))
+            default = float(value)
         except (TypeError, ValueError):
-            pass
+            return
+        if 1.0 <= default <= 81.0:
+            self._pending_import_dielectric = default
+            if not self._import_dialog.isVisible():
+                self._apply_pending_import_dielectric()
+
+    def _apply_pending_import_dielectric(self) -> None:
+        if self._pending_import_dielectric is not None:
+            self.dielectric_spin.setValue(self._pending_import_dielectric)
+            self._pending_import_dielectric = None
 
     # ============================================================ 内部
     def _has_project(self) -> bool:

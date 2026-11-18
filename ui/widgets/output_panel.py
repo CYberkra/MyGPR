@@ -182,10 +182,15 @@ class OutputPanel(QWidget):
             return
         tab = settings.get(_SETTINGS_KEY_TAB)
         if tab in ('log', 'jobs'):
-            self._activate(tab)
+            self._activate(tab, remember=False)
         open_ = settings.get(_SETTINGS_KEY_OPEN)
         if open_ is not None:
-            self._set_open(bool(open_), animate=False)
+            self._set_open(bool(open_), animate=False, remember=False)
+
+    def restore_layout(self, tab: str, open_: bool) -> None:
+        """回放已保存的布局，不改日志、任务或设置文件。"""
+        self._activate(tab, remember=False)
+        self._set_open(open_, animate=False, remember=False)
 
     def append_log(self, msg: str) -> None:
         """解析级别 → 存结构化条目 → 增量渲染 + 自动滚到底。
@@ -309,20 +314,20 @@ class OutputPanel(QWidget):
         if not self._open:
             self._set_open(True)
 
-    def _activate(self, route_key: str) -> None:
+    def _activate(self, route_key: str, *, remember: bool = True) -> None:
         self._current_tab = route_key
         index = 0 if route_key == 'log' else 1
         self._tabs.setCurrentItem(route_key)
         self._content.setCurrentIndex(index)
         self._tool_stacked.setCurrentIndex(index)
-        if self._settings is not None:
+        if remember and self._settings is not None:
             self._settings.set(_SETTINGS_KEY_TAB, route_key)
             self._settings.save()
 
     def is_open(self) -> bool:
         return self._open
 
-    def _set_open(self, open_: bool, animate: bool = True) -> None:
+    def _set_open(self, open_: bool, animate: bool = True, *, remember: bool = True) -> None:
         """展开/收起内容区；头部栏常驻。
 
         面板高度由主窗口竖向 QSplitter 分配（用户可拖拽），收展本身瞬时
@@ -333,7 +338,7 @@ class OutputPanel(QWidget):
         if self._open == open_:
             return
         self._open = open_
-        if self._settings is not None:
+        if remember and self._settings is not None:
             self._settings.set(_SETTINGS_KEY_OPEN, self._open)
             self._settings.save()
         self._fold_btn.setIcon(FIF.DOWN.icon() if open_ else FIF.UP.icon())

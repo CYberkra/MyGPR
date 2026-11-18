@@ -162,8 +162,8 @@ class TestSettingsGeneralPersist:
             page._prefetch_check.toggled) >= 1
         hits = []
         page.general_changed.connect(lambda: hits.append(1))
-        page._prefetch_check.setChecked(True)   # 默认未勾 → 勾选才状态变化
-        assert hits, '勾「自动预下载」必须通知主窗口写盘'
+        page._prefetch_check.setChecked(False)
+        assert hits, '切换「自动预下载」必须通知主窗口写盘'
 
     def test_other_general_controls_wired(self, qapp):
         page = self._page(qapp)
@@ -209,16 +209,16 @@ class TestMainWindowPersistsGeneralSettings:
             pytest.skip('MainWindow 在本环境不可用')
         try:
             page = win._page('settingsInterface')
-            page._prefetch_check.setChecked(True)
-            assert sm.get('auto_prefetch_basemap') is True
-            assert 'auto_prefetch_basemap' in __import__('json').loads(
-                path.read_text(encoding='utf-8'))
+            page._prefetch_check.setChecked(False)
+            assert sm.get('auto_prefetch_basemap') is False
+            assert __import__('json').loads(path.read_text(
+                encoding='utf-8'))['auto_prefetch_basemap'] is False
             ensure = getattr(win, 'ensure_pages_ready', None)
             if callable(ensure):
                 ensure()                      # 空间页是延迟构造页
             spatial = win._page('spatialInterface')
             if spatial is not None:
-                assert spatial._auto_prefetch_enabled is True
+                assert spatial._auto_prefetch_enabled is False
         finally:
             win.close()
 

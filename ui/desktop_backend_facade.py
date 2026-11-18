@@ -128,6 +128,17 @@ def evaluate_manual_gain_preview(matrix, nodes):
     return apply_manual_gain_curve(matrix, nodes)[0]
 
 
+def manual_gain_amplitude_factors(positions, nodes):
+    """Evaluate the shared gain curve without allocating a processed matrix."""
+    from mygpr.domain.processing.manual_gain import manual_gain_factors
+    return manual_gain_factors(positions, nodes)[0]
+
+
+def apply_display_agc(matrix, window: int, max_db: float):
+    from mygpr.domain.processing.display_agc import apply_display_agc as calculate_agc
+    return calculate_agc(matrix, window, max_db)
+
+
 def manual_gain_preview_bundle(matrix, header):
     """Keep every row/trace; use only the stored, matching physical axes."""
     import numpy as np

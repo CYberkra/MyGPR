@@ -49,16 +49,9 @@ class BScanPreferenceMixin:
         cmap = self._setting_choice('bscan_colormap',
                                     tuple(constants.COLORMAPS),
                                     constants.DEFAULT_COLORMAP)
-        gain_mode = self._setting_choice('bscan_gain_mode',
-                                         ('off', 'sec', 'tvg'), 'off')
-        try:
-            gain_alpha = float(self.settings.get('bscan_gain_alpha', 0.2))
-        except (TypeError, ValueError):
-            gain_alpha = 0.2
-        gain_alpha = min(max(gain_alpha, 0.0), 20.0)
-        tvg_db, tvg_power = self._setting_tvg_params()
+        display_state = self._global_bscan_display_state()
         for view in views:
-            view.set_global_display_preferences(self._global_bscan_display_state())
+            view.set_global_display_preferences(display_state)
             view.set_levels_follow_view(self._setting_flag('bscan_levels_follow_view', True))
             view.set_aspect_mode(aspect, notify=False)
             view.set_axis_modes(x_axis, y_axis, notify=False)
@@ -67,8 +60,7 @@ class BScanPreferenceMixin:
             view.set_display_levels(p_low, p_high, notify=False)
             view.set_colorbar_visible(colorbar_visible, notify=False)
             view.set_qc_marks_visible(self._setting_flag('bscan_qc_marks_visible', True))
-            view.set_gain(gain_mode, alpha=gain_alpha,
-                          db=tvg_db, power=tvg_power, notify=False)
+            self._set_bscan_gain(view, display_state)
             view.set_geometry_store(loader=self._load_fullscreen_geometry,
                                     saver=self._save_fullscreen_geometry)
             self._connect_bscan_signals(view)
@@ -78,11 +70,7 @@ class BScanPreferenceMixin:
     def _connect_bscan_signals(self, view) -> None:
         """把用户操作（而非恢复动作）接到设置写盘。
 
-        ⚠️ 必须**同时回写设置页控件**（``_mirror_bscan_setting``）：设置页的
-        ComboBox/SpinBox 是 B-Scan 偏好的第二份副本，而 ``closeEvent`` 会把
-        ``settings_page.settings()`` 整体回写设置文件。若工具条改了偏好却不
-        同步到设置页，关窗时就会被那份**过期的默认值**覆盖掉——表现为「在
-        工具条切了方形，重开又变回铺满」。这是排查过的真实缺陷，别只写盘。
+        工具条改变偏好时同步设置页控件，让两个入口显示同一个有效值。
         """
         if not hasattr(self, '_bscan_preference_views'):
             self._bscan_preference_views = WeakSet()
@@ -127,10 +115,24 @@ class BScanPreferenceMixin:
             ('bscan_colorbar_visible', 'colorbar'), ('bscan_contrast', 'contrast'),
         )}
         state['levels'] = list(self._setting_levels())
-        state.update(gain=self._setting_choice('bscan_gain_mode', ('off', 'sec', 'tvg'), 'off'),
-                     gain_alpha=self.settings.get('bscan_gain_alpha', 0.2))
+        try:
+            gain_alpha = float(self.settings.get('bscan_gain_alpha', 0.2))
+        except (TypeError, ValueError):
+            gain_alpha = 0.2
+        state.update(gain=self._setting_choice('bscan_gain_mode', constants.BSCAN_GAIN_MODES, 'off'),
+                     gain_alpha=min(max(gain_alpha, 0.0), 20.0))
         state['gain_db'], state['gain_power'] = self._setting_tvg_params()
+        state['gain_segment_db'] = [self.settings.get(key, default)
+                                    for _, key, default in constants.BSCAN_TVG_NODES]
+        state['gain_agc_window'] = self.settings.get('bscan_agc_window', constants.BSCAN_AGC_WINDOW_DEFAULT)
+        state['gain_agc_max_db'] = self.settings.get('bscan_agc_max_db', constants.BSCAN_AGC_MAX_DB_DEFAULT)
         return state
+
+    @staticmethod
+    def _set_bscan_gain(view, state: dict) -> None:
+        view.set_gain(state['gain'], alpha=state['gain_alpha'], db=state['gain_db'],
+                      power=state['gain_power'], segment_db=state['gain_segment_db'],
+                      agc_window=state['gain_agc_window'], agc_max_db=state['gain_agc_max_db'])
 
     def _on_qc_marks_visible_changed(self, visible: bool) -> None:
         """One remembered display preference; no processing or preview reload."""
@@ -142,7 +144,7 @@ class BScanPreferenceMixin:
                 view.set_qc_marks_visible(visible)
 
     def _mirror_bscan_setting(self, key: str, value) -> None:
-        """写盘 + 把设置页控件同步到同一值（避免关窗回写覆盖用户选择）。"""
+        """保存图面更改，并同步设置页和其他图面的全局偏好。"""
         self._persist_setting(key, value)
         self._sync_settings_page_bscan({key: value})
         for view in self._iter_bscan_views():
@@ -195,11 +197,12 @@ class BScanPreferenceMixin:
             return
         values = getter()
         changed = {key for key, value in values.items() if self.settings.get(key) != value}
-        for key, value in values.items():
-            self.settings.set(key, value)
-        self.settings.save()
+        if not changed or not self._save_settings_page_preferences(
+                'bscan', {key: values[key] for key in changed}):
+            return
+        display_state = self._global_bscan_display_state()
         for view in self._iter_bscan_views():
-            view.set_global_display_preferences(self._global_bscan_display_state())
+            view.set_global_display_preferences(display_state)
             view.set_levels_follow_view(bool(values.get('bscan_levels_follow_view', True)))
             view.set_qc_marks_visible(bool(values.get('bscan_qc_marks_visible', True)))
             if 'bscan_contrast' in changed:
@@ -216,16 +219,26 @@ class BScanPreferenceMixin:
                 view.set_display_levels(values['bscan_p_low'], values['bscan_p_high'], notify=False)
             if 'bscan_colorbar_visible' in changed:
                 view.set_colorbar_visible(bool(values.get('bscan_colorbar_visible', True)), notify=False)
-            if {'bscan_gain_mode', 'bscan_gain_alpha', 'bscan_tvg_db', 'bscan_tvg_power'} & changed:
-                tvg_db, tvg_power = self._setting_tvg_params()
-                view.set_gain(str(values.get('bscan_gain_mode', 'off')),
-                              alpha=float(values.get('bscan_gain_alpha', 0.2)),
-                              db=tvg_db, power=tvg_power, notify=False)
+            if not changed.isdisjoint(constants.BSCAN_GAIN_KEYS):
+                self._set_bscan_gain(view, display_state)
         proc = self.pages.get('processingInterface')
         if proc is not None and hasattr(proc, 'set_colorbar_pref'):
             proc.set_colorbar_pref(
                 bool(values.get('bscan_colorbar_visible', True)))
         # 面板数由处理页 tab 模型驱动，容器布局设置已退役（2026-09-24）
+
+    def _save_settings_page_preferences(self, scope: str, values: dict) -> bool:
+        """提交设置页的有效值，并在写入失败时恢复相关编辑器。"""
+        page = self._page('settingsInterface')
+        saved = self.settings.commit(values)
+        if not saved:
+            restore = getattr(page, 'restore_preferences', None)
+            if callable(restore):
+                restore(self.settings.get_all(), scope)
+        report = getattr(page, 'report_save', None)
+        if callable(report):
+            report(scope, saved)
+        return saved
 
     def _setting_levels(self) -> tuple[float, float]:
         """读色阶百分位；非法值回落 BScanView 默认（2 / 98）。"""
