@@ -424,6 +424,11 @@ class FileTreePanel(DockPanel):
                 and previous.get('run_step_index') == index - 1)
 
     # ------------------------------------------------ 页面记忆（主窗口调）
+    def restore_default_layout(self) -> None:
+        """清除按页收展记忆，保留当前页面、树内容和选择。"""
+        self._page_states.clear()
+        self.apply_page(self._current_page)
+
     def apply_page(self, object_name: str) -> None:
         """切页时按该页记忆的展开态切换（瞬时，不做动画）。"""
         page = str(object_name or '')

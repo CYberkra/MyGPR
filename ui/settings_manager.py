@@ -51,14 +51,16 @@ DEFAULT_SETTINGS = {
     'bscan_qc_marks_visible': True,                     # 异常道覆盖标记，仅显示偏好
     # B-Scan 色标映射（设置页统一选择）
     'bscan_colormap': 'seismic',
-    # B-Scan 显示增益：off 关闭 / sec SEC 补偿（扩散+指数吸收）/ tvg TVG 补偿
-    # （幂次曲线滑条调参，显示域不写数据）
+    # B-Scan 显示增益：关闭 / SEC / 幂次 TVG / 分段 TVG / 限幅 AGC
     'bscan_gain_mode': 'off',
     # SEC 衰减补偿系数（dB/采样轴单位：深度轴为 dB/m，时间轴为 dB/ns）
     'bscan_gain_alpha': 0.2,
     # TVG 深端总增益（dB，浅端恒 0 增益）与曲线弯度幂次（1 线性，>1 集中深部）
     'bscan_tvg_db': 24.0,
     'bscan_tvg_power': 1.0,
+    **{key: default for _, key, default in constants.BSCAN_TVG_NODES},
+    'bscan_agc_window': constants.BSCAN_AGC_WINDOW_DEFAULT,
+    'bscan_agc_max_db': constants.BSCAN_AGC_MAX_DB_DEFAULT,
     # B-Scan 全屏独立窗口几何（Qt saveGeometry 的 base64），空串=未存过
     'bscan_fullscreen_geometry': '',
     'spatial_basemap_source': 'gaode_img',               # 空间页底图源（与 map_tiles.DEFAULT_TILE_SOURCE 一致）
@@ -76,6 +78,9 @@ _NUMBER_RANGES = {
     'bscan_p_low': (0.0, 100.0), 'bscan_p_high': (0.0, 100.0),
     'bscan_gain_alpha': (0.0, 20.0), 'bscan_tvg_db': (0.0, 60.0),
     'bscan_tvg_power': (0.3, 3.0),
+    **{key: constants.BSCAN_TVG_NODE_RANGE for _, key, _ in constants.BSCAN_TVG_NODES},
+    'bscan_agc_window': constants.BSCAN_AGC_WINDOW_RANGE,
+    'bscan_agc_max_db': constants.BSCAN_AGC_MAX_DB_RANGE,
 }
 _CHOICES = {
     'update_channel': ('stable', 'preview'),
@@ -83,7 +88,7 @@ _CHOICES = {
     'output_panel_active_tab': ('log', 'jobs'),
     'bscan_aspect_mode': ('free', 'square', 'cell'),
     'bscan_x_axis': ('trace', 'distance'), 'bscan_y_axis': ('sample', 'elevation'),
-    'bscan_gain_mode': ('off', 'sec', 'tvg'), 'bscan_colormap': constants.COLORMAPS,
+    'bscan_gain_mode': constants.BSCAN_GAIN_MODES, 'bscan_colormap': constants.COLORMAPS,
 }
 
 
@@ -143,6 +148,19 @@ class SettingsManager:
         except (OSError, TypeError, ValueError) as e:
             logger.error('保存设置失败: %s (%s)', self.settings_file, e)
             return False
+
+    def commit(self, values: dict) -> bool:
+        """一组设置一起保存，失败时恢复提交前的会话状态。"""
+        previous = self.get_all()
+        saved = False
+        try:
+            for key, value in values.items():
+                self.set(key, value)
+            saved = self.save()
+            return saved
+        finally:
+            if not saved:
+                self._settings = previous
 
     # ------------------------------------------------------------ 访问
     def get(self, key, default=None):

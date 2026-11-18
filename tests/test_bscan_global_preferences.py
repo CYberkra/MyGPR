@@ -56,6 +56,39 @@ def add_view(preferences):
     return view, raw
 
 
+def test_percentile_draft_is_excluded_from_other_display_changes(preferences):
+    prefs, _, page = preferences
+    page._bscan_p_low_spin.setValue(6.0)
+    page._bscan_p_high_spin.setValue(95.0)
+    page._bscan_cmap_combo.setCurrentText('gray')
+
+    saved = SettingsManager(prefs.settings.settings_file)
+    assert saved.get('bscan_colormap') == 'gray'
+    assert (saved.get('bscan_p_low'), saved.get('bscan_p_high')) == (2.0, 98.0)
+    assert page._bscan_p_low_spin.value() == 6.0
+    page._levels_apply.click()
+    saved.load()
+    assert (saved.get('bscan_p_low'), saved.get('bscan_p_high')) == (6.0, 95.0)
+
+
+def test_search_reveals_advanced_control_without_saving(preferences, qapp):
+    prefs, _, page = preferences
+    changes = []
+    page.bscan_view_changed.connect(lambda: changes.append(True))
+    page.show()
+    page._search.setFocus()
+    page._search.setText('色阶百分位')
+    page._search.textEdited.emit('色阶百分位')
+    page._open_first_result()
+    qapp.processEvents()
+
+    assert page._active_category == 'bscan'
+    assert page._levels.toggle.isChecked()
+    assert page._bscan_p_low_spin.isVisibleTo(page)
+    assert not changes
+    assert prefs.settings.get('bscan_p_low') == 2.0
+
+
 def test_follow_switch_is_global_persistent_and_preserves_current_viewport(preferences):
     prefs, _, page = preferences
     first, raw = add_view(preferences)
@@ -256,3 +289,33 @@ def test_global_tvg_parameters_reach_views_and_win_over_saved_tabs(preferences):
     for view in (first, second):
         assert view.gain_mode() == 'tvg' and view._gain_db == 36 and view._gain_power == 1.8
     assert prefs.settings.get('bscan_tvg_db') == 36
+
+
+def test_piecewise_tvg_uses_full_nonuniform_axis_after_preference_restore(preferences):
+    prefs, _, page = preferences
+    early_view, _ = add_view(preferences)
+    stale_tab = early_view.export_display_state()
+    page._bscan_gain_combo.setCurrentText('piecewise_tvg')
+    for (spin, _, _), value in zip(page._bscan_tvg_node_spins, (12, 30, 10), strict=True):
+        spin.setValue(value)
+    early_view.restore_display_state(stale_tab)
+    late_view, _ = add_view(preferences)
+
+    axis = np.array([0.0, 16.5, 33.0, 50.0, 67.0, 83.5, 100.0])
+    raw = np.tile([1.0, -2.0], (axis.size, 1))
+    expected_db = np.array([0.0, 6.0, 12.0, 21.0, 30.0, 20.0, 10.0])
+    expected = np.power(10.0, expected_db / 20.0)[:, None] * raw
+    bundle = SimpleNamespace(matrix=raw, vmin=-2.0, vmax=1.0, sample_axis=axis,
+                             sample_axis_label='双程走时 (ns)')
+    for view in (early_view, late_view):
+        view.set_bundle(bundle)
+        assert view.gain_mode() == 'piecewise_tvg'
+        assert view.export_display_state()['gain_segment_db'] == [12.0, 30.0, 10.0]
+        np.testing.assert_allclose(view._image_item.image, expected)
+        assert view.set_view_time_window(16.5, 83.5)
+        np.testing.assert_allclose(view._image_item.image, expected)
+        np.testing.assert_array_equal(view._matrix, np.tile([1.0, -2.0], (axis.size, 1)))
+
+    saved = SettingsManager(prefs.settings.settings_file)
+    assert saved.get('bscan_gain_mode') == 'piecewise_tvg'
+    assert [saved.get(key) for _, key, _ in page._bscan_tvg_node_spins] == [12.0, 30.0, 10.0]
