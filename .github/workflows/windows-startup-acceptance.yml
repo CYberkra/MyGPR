@@ -18,8 +18,8 @@ jobs:
     env:
       BASELINE_SHA: e73198accbf1fbe89f8aeaa5865f2f42eaffa29c
       BASELINE_RUN: '44375595253'
-      CANDIDATE_SHA: 'e73198accbf1fbe89f8aeaa5865f2f42eaffa29c'
-      CANDIDATE_RUN: '44375595253'
+      CANDIDATE_SHA: '04dd492aff1be495b1b6ffe84a3c277516feae70'
+      CANDIDATE_RUN: '44465354349'
       PYTHONIOENCODING: utf-8
       PYTHONDONTWRITEBYTECODE: '1'
 
@@ -100,7 +100,7 @@ jobs:
         run: |
           $baseline = 'output/package-inputs/baseline'
           if (Test-Path -LiteralPath 'output/package-inputs/baseline-aligned/build-provenance.json') { $baseline = 'output/package-inputs/baseline-aligned' }
-          python -B tools/installer_startup_probe.py --fixture output/startup-fixture --output output/installed-startup --baseline $baseline --candidate output/package-inputs/candidate --baseline-ref $env:BASELINE_SHA --candidate-ref $env:CANDIDATE_SHA --pairs 1
+          python -B tools/installer_startup_probe.py --fixture output/startup-fixture --output output/installed-startup --baseline $baseline --candidate output/package-inputs/candidate --baseline-ref $env:BASELINE_SHA --candidate-ref $env:CANDIDATE_SHA --pairs 4
           exit $LASTEXITCODE
 
       - name: Upload timings, screenshots and provenance
