@@ -151,6 +151,7 @@ def test_jobs_keyboard_menu_is_same_menu_and_setting_text_keeps_native_policy(pa
     assert action(menu, 'copy-id').isEnabled()
     page._job_context.close()
     settings = pages(SettingsPage)
+    settings._nav_buttons['storage'].click()
     assert settings._root_edit.contextMenuPolicy() == Qt.ContextMenuPolicy.DefaultContextMenu
     native = settings._root_edit.createStandardContextMenu()
     assert native.actions()

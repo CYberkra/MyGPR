@@ -1,8 +1,6 @@
 """Application preferences with a searchable, display-only B-scan preview."""
 
-import math
 from contextlib import ExitStack
-from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPointF, QSignalBlocker, QStringListModel, Qt, QTimer, QUrl, pyqtSignal
@@ -30,12 +28,20 @@ from qfluentwidgets import (
     PushButton,
     ScrollArea,
     SpinBox,
+    isDarkTheme,
 )
 
 from ui import constants, file_dialogs
 from ui.page_scaffold import style_transparent_scroll
 from ui.settings_support import read_application_version as _read_version
-from ui.settings_support import settings_locations
+from ui.settings_support import (
+    SETTINGS_CATEGORIES,
+    SettingTarget,
+    deferred_setting_targets,
+    finite_setting_value,
+    match_setting_targets,
+    settings_locations,
+)
 from ui.widgets.settings_bscan_preview import SettingsBScanPreview
 from ui.widgets.settings_controls import (
     SettingsChoice,
@@ -55,35 +61,6 @@ _TVG_DB_STEPS = tuple(value / 2 for value in range(121))
 _TVG_POWER_STEPS = tuple(value / 100 for value in range(30, 301))
 _AGC_WINDOW_STEPS = tuple(range(constants.BSCAN_AGC_WINDOW_RANGE[0],
                                 constants.BSCAN_AGC_WINDOW_RANGE[1] + 1, 2))
-_CATEGORIES = {
-    'appearance': '外观与工作区',
-    'bscan': 'B-scan 显示',
-    'processing': '处理默认值',
-    'spatial': '空间与底图',
-    'storage': '存储与诊断',
-    'about': '关于与更新',
-}
-
-
-@dataclass(frozen=True)
-class _SettingTarget:
-    label: str
-    category: str
-    control: QWidget
-    keywords: str = ''
-    disclosure: SettingsDisclosure | None = None
-
-    @property
-    def caption(self) -> str:
-        return f'{self.label}    {_CATEGORIES[self.category]}'
-
-
-def _finite(value, default: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return default
-    return number if math.isfinite(number) else default
 
 
 def _name(widget: QWidget, name: str, accessible: str) -> None:
@@ -113,14 +90,18 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self._manager = None
         self._project_root = constants.DEFAULT_PROJECT_ROOT
+        self._theme_text = constants.THEME_LIGHT
+        self._general = {'default_dielectric': constants.DEFAULT_DIELECTRIC,
+                         'max_workers': constants.MAX_WORKERS, 'auto_prefetch_basemap': True}
+        self._general_controls = {}
         self._percentiles = (2.0, 98.0)
         self._running_workers = None
         self._active_category = 'bscan'
         self._preview_wide = None
-        self._targets: list[_SettingTarget] = []
-        self._matches: list[_SettingTarget] = []
+        self._targets = deferred_setting_targets()
+        self._matches: list[SettingTarget] = []
         self._highlighted: QWidget | None = None
-        self._pending_focus: _SettingTarget | None = None
+        self._pending_focus: SettingTarget | None = None
         self._focus_timer = QTimer(self)
         self._focus_timer.setSingleShot(True)
         self._focus_timer.timeout.connect(self._reveal)
@@ -134,6 +115,8 @@ class SettingsPage(QWidget):
         outer.addWidget(self._surface, 1)
         shell = _column(self._surface)
         shell.addWidget(self._build_search())
+        self._dark_theme: bool | None = None
+        self.apply_theme(isDarkTheme())
 
         main = QWidget(self._surface)
         body = QHBoxLayout(main)
@@ -152,20 +135,17 @@ class SettingsPage(QWidget):
         self._status.hide()
         shell.addWidget(self._status)
 
-        for key, builder in (
-            ('appearance', self._build_appearance),
-            ('bscan', self._build_bscan),
-            ('processing', self._build_processing),
-            ('spatial', self._build_spatial),
-            ('storage', self._build_storage),
-            ('about', self._build_about),
-        ):
-            builder(key)
+        # UpdateBinding may start before the About category is displayed.
+        self.update_panel = UpdatePanel(self)
+        self.update_panel.hide()
+        self._builders = {
+            'appearance': self._build_appearance, 'bscan': self._build_bscan,
+            'processing': self._build_processing, 'spatial': self._build_spatial,
+            'storage': self._build_storage, 'about': self._build_about,
+        }
         self._select_category('bscan')
         self._sync_bscan_details()
-        self._update_root_draft()
         self._update_viewport()
-        self.apply_theme(False)
 
     def _build_search(self) -> QWidget:
         header = QWidget(self._surface)
@@ -174,7 +154,7 @@ class SettingsPage(QWidget):
         self._category_choice = ComboBox(header)
         self._protect_scroll_input(self._category_choice)
         _name(self._category_choice, 'settingsCategories', '设置分类')
-        for key, label in _CATEGORIES.items():
+        for key, label in SETTINGS_CATEGORIES.items():
             self._category_choice.addItem(label, userData=key)
         self._category_choice.currentIndexChanged.connect(
             lambda _index: self._select_category(self._category_choice.currentData()))
@@ -210,7 +190,7 @@ class SettingsPage(QWidget):
         nav.setContentsMargins(10, 10, 10, 0)
         nav.setSpacing(3)
         self._category_buttons = QButtonGroup(sidebar)
-        for key, label in _CATEGORIES.items():
+        for key, label in SETTINGS_CATEGORIES.items():
             button = QPushButton(label, sidebar)
             button.setProperty('settingsRole', 'nav')
             button.setCheckable(True)
@@ -229,7 +209,7 @@ class SettingsPage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(22, 14, 22, 22)
         layout.setSpacing(9)
-        layout.addWidget(settings_label(_CATEGORIES[key], 'title'))
+        layout.addWidget(settings_label(SETTINGS_CATEGORIES[key], 'title'))
         if description:
             layout.addWidget(settings_label(description, 'hint', wrap=True))
         scroll.setWidget(panel)
@@ -356,7 +336,10 @@ class SettingsPage(QWidget):
 
     def _target(self, category: str, label: str, control: QWidget, keywords: str = '',
                 disclosure: SettingsDisclosure | None = None) -> None:
-        self._targets.append(_SettingTarget(label, category, control, keywords, disclosure))
+        key = (category, label)
+        if key in self._targets:
+            keywords = self._targets[key].keywords
+        self._targets[key] = SettingTarget(label, category, control, keywords, disclosure)
 
     def _build_appearance(self, key: str) -> None:
         layout = self._category(key)
@@ -365,7 +348,8 @@ class SettingsPage(QWidget):
             ('深色', constants.THEME_DARK, 'settingsThemeDark'),
         ))
         _name(self._theme_combo, 'settingsTheme', '主题')
-        self._theme_combo.currentTextChanged.connect(self.theme_changed)
+        self._theme_combo.setCurrentText(self._theme_text)
+        self._theme_combo.currentTextChanged.connect(self._request_theme)
         self._row(layout, '主题', self._theme_combo)
         reset = PushButton('恢复面板布局…')
         reset.clicked.connect(self._confirm_layout_reset)
@@ -373,9 +357,9 @@ class SettingsPage(QWidget):
         shortcuts = PushButton('查看快捷键')
         shortcuts.clicked.connect(self.shortcuts_requested)
         self._row(layout, '快捷键', shortcuts, hint='按操作或按键查找。')
-        self._target(key, '主题', self._theme_combo, '浅色 深色 外观 颜色')
-        self._target(key, '恢复面板布局', reset, '还原 默认 文件树 边栏 侧栏 窗口')
-        self._target(key, '查看快捷键', shortcuts, 'F1 键盘')
+        self._target(key, '主题', self._theme_combo)
+        self._target(key, '恢复面板布局', reset)
+        self._target(key, '查看快捷键', shortcuts)
         layout.addStretch()
 
     def _build_bscan(self, key: str) -> None:
@@ -561,28 +545,29 @@ class SettingsPage(QWidget):
         layout = self._category(key)
         self._dielectric_spin = self._double(
             'settingsDielectric', '默认相对介电常数', 1, 81, constants.DEFAULT_DIELECTRIC, 0.5)
-        self._dielectric_spin.valueChanged.connect(self._emit_general_changed)
+        self._dielectric_spin.setValue(self._general['default_dielectric'])
+        self._bind_general('default_dielectric', self._dielectric_spin, self._dielectric_spin.valueChanged)
         self._row(layout, '默认相对介电常数', self._dielectric_spin, hint='用于之后打开的导入表单。')
         self._workers_spin = SpinBox()
         self._protect_scroll_input(self._workers_spin)
         _name(self._workers_spin, 'settingsWorkers', '并行工作线程数')
         self._workers_spin.setRange(1, 8)
         self._workers_spin.setKeyboardTracking(False)
-        self._workers_spin.setValue(constants.MAX_WORKERS)
-        self._workers_spin.valueChanged.connect(self._emit_general_changed)
+        self._workers_spin.setValue(self._general['max_workers'])
+        self._bind_general('max_workers', self._workers_spin, self._workers_spin.valueChanged)
         self._row(layout, '并行工作线程数', self._workers_spin, hint='重启后生效。')
-        self._target(key, '默认相对介电常数', self._dielectric_spin, '导入 εr')
-        self._target(key, '并行工作线程数', self._workers_spin, '并发 重启')
+        self._target(key, '默认相对介电常数', self._dielectric_spin)
+        self._target(key, '并行工作线程数', self._workers_spin)
         layout.addStretch()
 
     def _build_spatial(self, key: str) -> None:
         layout = self._category(key)
         self._prefetch_check = CheckBox('自动预下载测线区域底图')
-        self._prefetch_check.setChecked(True)
-        self._prefetch_check.toggled.connect(self._emit_general_changed)
+        self._prefetch_check.setChecked(self._general['auto_prefetch_basemap'])
+        self._bind_general('auto_prefetch_basemap', self._prefetch_check, self._prefetch_check.toggled)
         layout.addWidget(self._prefetch_check)
         layout.addWidget(settings_label('手动下载和可见地图按需加载仍可联网。', 'hint', wrap=True))
-        self._target(key, self._prefetch_check.text(), self._prefetch_check, '地图 下载 联网')
+        self._target(key, self._prefetch_check.text(), self._prefetch_check)
         layout.addStretch()
 
     def _build_storage(self, key: str) -> None:
@@ -606,22 +591,24 @@ class SettingsPage(QWidget):
         self._root_status = settings_label('', 'hint', wrap=True)
         _name(self._root_status, 'settingsProjectRootStatus', '项目目录保存状态')
         layout.addWidget(self._root_status)
-        self._target(key, '默认项目根目录', self._root_edit, '路径 新建 项目')
-        for location, label, keywords in (
-            ('settings', '设置文件目录', '配置'),
-            ('logs', '日志目录', '错误 log'),
-            ('tiles', '底图缓存目录', '瓦片 缓存'),
+        self._target(key, '默认项目根目录', self._root_edit)
+        for location, label in (
+            ('settings', '设置文件目录'),
+            ('logs', '日志目录'),
+            ('tiles', '底图缓存目录'),
         ):
             button = PushButton('打开目录')
             button.setAccessibleName(f'打开{label}')
             button.clicked.connect(lambda _checked=False, kind=location: self._open_location(kind))
             self._location_buttons[location] = button
             self._row(layout, label, button)
-            self._target(key, label, button, keywords)
+            self._target(key, label, button)
         diagnostic = PushButton('预览诊断摘要')
         diagnostic.clicked.connect(self.diagnostics_requested)
         self._row(layout, '诊断摘要', diagnostic, hint='预览后可复制版本与运行状态。')
-        self._target(key, '诊断摘要', diagnostic, '排查 版本')
+        self._target(key, '诊断摘要', diagnostic)
+        self._update_root_draft()
+        self._update_location_tips()
         layout.addStretch()
 
     def _build_about(self, key: str) -> None:
@@ -632,32 +619,32 @@ class SettingsPage(QWidget):
         guide = PushButton('使用手册')
         guide.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(_USER_GUIDE_URL)))
         self._row(layout, '文档', guide)
-        self.update_panel = UpdatePanel()
         layout.addWidget(self.update_panel)
-        self._target(key, '使用手册', guide, '帮助 文档')
+        self.update_panel.show()
+        self._target(key, '使用手册', guide)
         update_target = settings_label('应用更新', 'label')
         update_target.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         layout.insertWidget(layout.indexOf(self.update_panel), update_target)
-        self._target(key, '应用更新', update_target, '检查更新 发布 安装版')
+        self._target(key, '应用更新', update_target)
         layout.addStretch()
 
     def _select_category(self, key: str) -> None:
-        if key not in self._panels:
+        builder = self._builders.get(key)
+        if builder is None:
             return
+        if key not in self._panels:
+            builder(key)
         self._highlight(None)
         self._active_category = key
         self._nav_buttons[key].setChecked(True)
         with QSignalBlocker(self._category_choice):
-            self._category_choice.setCurrentIndex(list(_CATEGORIES).index(key))
+            self._category_choice.setCurrentIndex(list(SETTINGS_CATEGORIES).index(key))
         for category, scroll in self._panels.items():
             scroll.setVisible(category == key)
 
     def _search_changed(self, text: str) -> None:
         words = text.casefold().split()
-        self._matches = [
-            target for target in self._targets
-            if words and all(word in (target.caption + ' ' + target.keywords).casefold() for word in words)
-        ]
+        self._matches = match_setting_targets(self._targets, words)
         self._search_model.setStringList([target.caption for target in self._matches])
         self._empty_search.setVisible(bool(words and not self._matches))
         if self._matches:
@@ -670,15 +657,16 @@ class SettingsPage(QWidget):
             self._go_to_target(self._matches[0])
 
     def _open_result(self, caption: str) -> None:
-        target = next((item for item in self._targets if item.caption == caption), None)
+        target = next((item for item in self._targets.values() if item.caption == caption), None)
         if target is not None:
             self._go_to_target(target)
 
-    def _go_to_target(self, target: _SettingTarget) -> None:
+    def _go_to_target(self, target: SettingTarget) -> None:
         with QSignalBlocker(self._search):
             self._search.clear()
         self._search_changed('')
         self._select_category(target.category)
+        target = self._targets[(target.category, target.label)]
         if target.disclosure is not None:
             target.disclosure.set_expanded(True)
         self._pending_focus = target
@@ -686,7 +674,7 @@ class SettingsPage(QWidget):
 
     def _reveal(self) -> None:
         target, self._pending_focus = self._pending_focus, None
-        if target is None or self._active_category != target.category:
+        if target is None or target.control is None or self._active_category != target.category:
             return
         if self._search.text() == target.caption:
             self._search.clear()
@@ -708,7 +696,7 @@ class SettingsPage(QWidget):
             row.style().polish(row)
 
     def focus_bscan_settings(self) -> None:
-        self._go_to_target(_SettingTarget('颜色映射', 'bscan', self._bscan_cmap_combo))
+        self._go_to_target(SettingTarget('颜色映射', 'bscan', self._bscan_cmap_combo))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -735,9 +723,12 @@ class SettingsPage(QWidget):
         self._preview_grid.setRowStretch(1, 1 if wide else 0)
 
     def apply_theme(self, dark: bool) -> None:
+        if self._dark_theme == dark:
+            return
         style = settings_stylesheet(dark)
         self._surface.setStyleSheet(style)
         self._completer.popup().setStyleSheet(style)
+        self._dark_theme = dark
 
     def _contrast_changed(self, value: float) -> None:
         with QSignalBlocker(self._bscan_contrast_slider):
@@ -795,8 +786,14 @@ class SettingsPage(QWidget):
     def _refresh_preview(self) -> None:
         self._preview.set_preferences(self.bscan_view_settings())
 
-    def _emit_general_changed(self) -> None:
-        self.general_changed.emit()
+    def _bind_general(self, key, control, signal) -> None:
+        self._general_controls[key] = control
+
+        def changed(value):
+            self._general[key] = value
+            self.general_changed.emit()
+
+        signal.connect(changed)
 
     def _update_root_draft(self) -> None:
         dirty = self._root_edit.text().strip() != self._project_root
@@ -812,10 +809,10 @@ class SettingsPage(QWidget):
         label.setVisible(bool(text))
 
     def report_save(self, scope: str, saved: bool, message: str = '') -> None:
-        if scope == 'general' and saved and self._running_workers != self._workers_spin.value():
+        if scope == 'general' and saved and self._running_workers != self._general['max_workers']:
             message = message or '设置已保存。线程数重启后生效。'
         message = message or ('设置已保存。' if saved else '设置未保存。保留上次成功保存的值。')
-        label = self._root_status if scope == 'root' else self._status
+        label = self._root_status if scope == 'root' and 'storage' in self._panels else self._status
         self._show_status(label, message, 'hint' if saved else 'error')
 
     def _request_root(self) -> None:
@@ -824,9 +821,10 @@ class SettingsPage(QWidget):
 
     def commit_project_root(self, path: str) -> None:
         self._project_root = path
-        with QSignalBlocker(self._root_edit):
-            self._root_edit.setText(path)
-        self._update_root_draft()
+        if 'storage' in self._panels:
+            with QSignalBlocker(self._root_edit):
+                self._root_edit.setText(path)
+            self._update_root_draft()
 
     def _browse_project_root(self) -> None:
         path = file_dialogs.getExistingDirectory(
@@ -849,7 +847,12 @@ class SettingsPage(QWidget):
 
     def set_settings_manager(self, manager) -> None:
         self._manager = manager
-        for key, path in settings_locations(manager).items():
+        self._update_location_tips()
+
+    def _update_location_tips(self) -> None:
+        if not self._location_buttons or self._manager is None:
+            return
+        for key, path in settings_locations(self._manager).items():
             self._location_buttons[key].setToolTip(str(path))
             self._location_buttons[key].setAccessibleDescription(str(path))
 
@@ -872,25 +875,37 @@ class SettingsPage(QWidget):
         self.restore_preferences(data, 'general')
         self.commit_project_root(str(data.get('project_root', constants.DEFAULT_PROJECT_ROOT)))
         self.sync_bscan_view_settings(data, initial=True)
-        self._running_workers = self._workers_spin.value()
+        self._running_workers = self._general['max_workers']
 
     def restore_preferences(self, values: dict, scope: str) -> None:
         if scope == 'theme':
             self.set_theme_text(str(values.get('theme', constants.THEME_LIGHT)))
         elif scope == 'general':
-            with ExitStack() as signals:
-                for widget in (self._dielectric_spin, self._workers_spin, self._prefetch_check):
-                    signals.enter_context(QSignalBlocker(widget))
-                self._dielectric_spin.setValue(_finite(
-                    values.get('default_dielectric'), constants.DEFAULT_DIELECTRIC))
-                self._workers_spin.setValue(int(_finite(values.get('max_workers'), constants.MAX_WORKERS)))
-                self._prefetch_check.setChecked(bool(values.get('auto_prefetch_basemap', True)))
+            dielectric = finite_setting_value(values.get('default_dielectric'), constants.DEFAULT_DIELECTRIC)
+            workers = int(finite_setting_value(values.get('max_workers'), constants.MAX_WORKERS))
+            self._general = {'default_dielectric': round(min(max(dielectric, 1.0), 81.0), 2),
+                             'max_workers': min(max(workers, 1), 8),
+                             'auto_prefetch_basemap': bool(values.get('auto_prefetch_basemap', True))}
+            for key, control in self._general_controls.items():
+                with QSignalBlocker(control):
+                    if key == 'auto_prefetch_basemap':
+                        control.setChecked(self._general[key])
+                    else:
+                        control.setValue(self._general[key])
         elif scope == 'bscan':
             self.sync_bscan_view_settings(values)
 
     def set_theme_text(self, text: str) -> None:
-        with QSignalBlocker(self._theme_combo):
-            self._theme_combo.setCurrentText(text)
+        if text not in (constants.THEME_LIGHT, constants.THEME_DARK):
+            return
+        self._theme_text = text
+        if 'appearance' in self._panels:
+            with QSignalBlocker(self._theme_combo):
+                self._theme_combo.setCurrentText(text)
+
+    def _request_theme(self, theme: str) -> None:
+        self._theme_text = theme
+        self.theme_changed.emit(theme)
 
     @staticmethod
     def _select_by_data(combo, value, fallback: str) -> None:
@@ -930,7 +945,7 @@ class SettingsPage(QWidget):
             for spin, key, default in spins:
                 if key in values or initial:
                     signals.enter_context(QSignalBlocker(spin))
-                    spin.setValue(_finite(values.get(key), default if initial else spin.value()))
+                    spin.setValue(finite_setting_value(values.get(key), default if initial else spin.value()))
             for check, key in checks:
                 if key in values or initial:
                     signals.enter_context(QSignalBlocker(check))
@@ -938,8 +953,8 @@ class SettingsPage(QWidget):
             signals.enter_context(QSignalBlocker(self._bscan_contrast_slider))
             self._bscan_contrast_slider.setValue(round(100 * self._bscan_contrast_spin.value()))
             if initial or 'bscan_p_low' in values or 'bscan_p_high' in values:
-                low = _finite(values.get('bscan_p_low'), self._percentiles[0])
-                high = _finite(values.get('bscan_p_high'), self._percentiles[1])
+                low = finite_setting_value(values.get('bscan_p_low'), self._percentiles[0])
+                high = finite_setting_value(values.get('bscan_p_high'), self._percentiles[1])
                 if 0 <= low < high <= 100:
                     self._percentiles = low, high
                 elif initial:
@@ -976,10 +991,8 @@ class SettingsPage(QWidget):
 
     def settings(self) -> dict:
         return {
-            'theme': self._theme_combo.currentText(),
-            'default_dielectric': self._dielectric_spin.value(),
-            'max_workers': self._workers_spin.value(),
+            'theme': self._theme_text,
+            **self._general,
             'project_root': self._project_root,
-            'auto_prefetch_basemap': self._prefetch_check.isChecked(),
             **self.bscan_view_settings(),
         }

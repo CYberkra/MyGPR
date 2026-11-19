@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import platform
 import re
 import sys
+from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
@@ -30,6 +32,77 @@ from ui.desktop_backend_facade import get_tile_cache_dir
 from ui.page_scaffold import PanelStateMixin
 from ui.settings_manager import DEFAULT_SETTINGS, SettingsManager
 from ui.widgets.bscan_fullscreen import FullscreenHost
+from ui.widgets.settings_controls import SettingsDisclosure
+
+
+SETTINGS_CATEGORIES = {
+    'appearance': '外观与工作区',
+    'bscan': 'B-scan 显示',
+    'processing': '处理默认值',
+    'spatial': '空间与底图',
+    'storage': '存储与诊断',
+    'about': '关于与更新',
+}
+_DEFERRED_SEARCH = {
+    'appearance': (
+        ('主题', '浅色 深色 外观 颜色'),
+        ('恢复面板布局', '还原 默认 文件树 边栏 侧栏 窗口'),
+        ('查看快捷键', 'F1 键盘'),
+    ),
+    'processing': (
+        ('默认相对介电常数', '导入 εr'),
+        ('并行工作线程数', '并发 重启'),
+    ),
+    'spatial': (('自动预下载测线区域底图', '地图 下载 联网'),),
+    'storage': (
+        ('默认项目根目录', '路径 新建 项目'),
+        ('设置文件目录', '配置'),
+        ('日志目录', '错误 log'),
+        ('底图缓存目录', '瓦片 缓存'),
+        ('诊断摘要', '排查 版本'),
+    ),
+    'about': (('使用手册', '帮助 文档'), ('应用更新', '检查更新 发布 安装版')),
+}
+
+
+@dataclass(frozen=True)
+class SettingTarget:
+    label: str
+    category: str
+    control: QWidget | None
+    keywords: str = ''
+    disclosure: SettingsDisclosure | None = None
+
+    @property
+    def caption(self) -> str:
+        return f'{self.label}    {SETTINGS_CATEGORIES[self.category]}'
+
+
+def finite_setting_value(value, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return number if math.isfinite(number) else default
+
+
+def deferred_setting_targets() -> dict[tuple[str, str], SettingTarget]:
+    return {
+        (category, label): SettingTarget(label, category, None, keywords)
+        for category, entries in _DEFERRED_SEARCH.items()
+        for label, keywords in entries
+    }
+
+
+def match_setting_targets(
+    targets: dict[tuple[str, str], SettingTarget], words: list[str],
+) -> list[SettingTarget]:
+    return [
+        target for category in SETTINGS_CATEGORIES
+        for target in targets.values()
+        if target.category == category and words
+        and all(word in (target.caption + ' ' + target.keywords).casefold() for word in words)
+    ]
 
 
 def read_application_version() -> str:
