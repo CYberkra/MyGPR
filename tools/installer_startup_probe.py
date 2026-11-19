@@ -200,7 +200,8 @@ def settings_frame(hwnd):
 
 
 def run_region(width, _h, scale):
-    return width - round(370 * scale), round(82 * scale), width - round(6 * scale), round(134 * scale)
+    # The project page's blue Import button is further left on the same row.
+    return width - round(145 * scale), round(82 * scale), width - round(6 * scale), round(134 * scale)
 
 
 def run_button(hwnd):
@@ -356,6 +357,9 @@ def sample(command, cwd, folder, fixture=None, *, source=False):
 def compare(dest, executables, fixture, pairs):
     summary = {}
     for scenario, project in (("empty", None), ("restore", fixture)):
+        if pairs > 1:
+            for version, exe in executables.items():
+                sample([str(exe)], exe.parent, dest / f"{scenario}-warmup-{version}", project)
         samples = []
         for pair in range(1, pairs + 1):
             order = ("baseline", "candidate") if pair % 2 else ("candidate", "baseline")
