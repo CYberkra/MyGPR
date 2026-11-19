@@ -1,0 +1,124 @@
+name: MyGPR installed startup comparison
+on:
+  push:
+    branches: [codex/windows-startup-acceptance-20261119]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: installed-startup-acceptance-20261119
+  cancel-in-progress: true
+
+jobs:
+  installed-comparison:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      BASELINE_SHA: e73198accbf1fbe89f8aeaa5865f2f42eaffa29c
+      BASELINE_RUN: '44375595253'
+      CANDIDATE_SHA: 'e73198accbf1fbe89f8aeaa5865f2f42eaffa29c'
+      CANDIDATE_RUN: '44375595253'
+      PYTHONIOENCODING: utf-8
+      PYTHONDONTWRITEBYTECODE: '1'
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify and download the two release build artifacts
+        id: packages
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          foreach ($variant in @('baseline', 'candidate')) {
+            $sha = if ($variant -eq 'baseline') { $env:BASELINE_SHA } else { $env:CANDIDATE_SHA }
+            $id = if ($variant -eq 'baseline') { $env:BASELINE_RUN } else { $env:CANDIDATE_RUN }
+            $run = gh run view $id --json name,conclusion,headSha | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or $run.name -ne 'MyGPR Windows packages' -or $run.conclusion -ne 'success' -or $run.headSha -ne $sha) { throw "Invalid $variant build" }
+            gh run download $id --name windows-package-release --dir "output/package-inputs/$variant"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          $candidate = Get-Content -LiteralPath 'output/package-inputs/candidate/build-provenance.json' -Raw | ConvertFrom-Json
+          $baseline = Get-Content -LiteralPath 'output/package-inputs/baseline/build-provenance.json' -Raw | ConvertFrom-Json
+          $runtime = $candidate.python.Split(' ')[0]
+          if ($runtime -notmatch '^3\.13\.\d+$') { throw 'Unexpected application Python version' }
+          "python=$runtime" >> $env:GITHUB_OUTPUT
+          if ($candidate.python -ne $baseline.python) { 'rebuild_baseline=true' >> $env:GITHUB_OUTPUT }
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ steps.packages.outputs.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-gui.txt
+            requirements-windows-build.txt
+
+      - name: Align baseline Python patch when required
+        if: steps.packages.outputs.rebuild_baseline == 'true'
+        shell: pwsh
+        run: |
+          $original = (Get-Location).Path
+          $baselineSource = Join-Path $env:RUNNER_TEMP 'startup-baseline-source'
+          $baselineVenv = Join-Path $env:RUNNER_TEMP 'startup-baseline-env'
+          $replacement = Join-Path $original 'output/package-inputs/baseline-aligned'
+          git worktree add --detach $baselineSource $env:BASELINE_SHA
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m venv $baselineVenv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $baselineVenv 'Scripts/python.exe'
+          Set-Location -LiteralPath $baselineSource
+          & $python -m pip install -r requirements-windows-build.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip wheel . --no-deps --wheel-dir output/release-wheels
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $wheel = Get-ChildItem output/release-wheels -Filter '*.whl' | Select-Object -First 1
+          & $python -m pip install "$($wheel.FullName)[gui]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python packaging/windows/build.py --source-ref $env:BASELINE_SHA --output $replacement --inno 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe'
+          exit $LASTEXITCODE
+
+      - name: Prepare the isolated synthetic project fixture
+        shell: pwsh
+        run: |
+          python -m pip install -r requirements.txt pywin32==312
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $repo = (Get-Location).Path
+          $env:PYTHONPATH = $repo
+          $env:MYGPR_RUNTIME_ROOT = Join-Path $repo 'output/fixture-runtime'
+          python -B scripts/benchmark_windows_startup.py --make-fixture (Join-Path $repo 'output/startup-fixture')
+          exit $LASTEXITCODE
+
+      - name: Compare actual installed Windows executables
+        shell: pwsh
+        run: |
+          $baseline = 'output/package-inputs/baseline'
+          if (Test-Path -LiteralPath 'output/package-inputs/baseline-aligned/build-provenance.json') { $baseline = 'output/package-inputs/baseline-aligned' }
+          python -B tools/installer_startup_probe.py --fixture output/startup-fixture --output output/installed-startup --baseline $baseline --candidate output/package-inputs/candidate --baseline-ref $env:BASELINE_SHA --candidate-ref $env:CANDIDATE_SHA --pairs 1
+          exit $LASTEXITCODE
+
+      - name: Upload timings, screenshots and provenance
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installed-startup-comparison
+          path: |
+            output/installed-startup/summary.json
+            output/installed-startup/provenance.json
+            output/installed-startup/install-*.log
+            output/installed-startup/empty-*/*.json
+            output/installed-startup/empty-*/*.png
+            output/installed-startup/empty-*/*.txt
+            output/installed-startup/empty-*/*.log
+            output/installed-startup/restore-*/*.json
+            output/installed-startup/restore-*/*.png
+            output/installed-startup/restore-*/*.txt
+            output/installed-startup/restore-*/*.log
+            output/installed-startup/*/logs/mygpr-events.jsonl
+          if-no-files-found: warn
