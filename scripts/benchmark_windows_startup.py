@@ -11,8 +11,7 @@ import time
 from pathlib import Path
 
 
-def prepare_fixture(repo: Path, project_path: Path) -> None:
-    sys.path.insert(0, str(repo))
+def prepare_fixture(project_path: Path) -> None:
     import numpy as np
 
     from mygpr.interfaces.backend import MyGPRBackend
@@ -29,25 +28,128 @@ def prepare_fixture(repo: Path, project_path: Path) -> None:
         backend.shutdown()
 
 
+class StartupObservation:
+    def __init__(self, origin, restore):
+        self.origin = origin
+        self.restore = restore
+        self.marks, self.spans, self.audit, self.beats = {}, {}, {}, []
+
+    def now(self):
+        return (time.perf_counter_ns() - self.origin) / 1e6
+
+    def mark(self, key):
+        self.marks.setdefault(key, self.now())
+
+    @staticmethod
+    def click(widget):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+
+        QTest.mouseClick(widget, Qt.MouseButton.LeftButton, pos=widget.rect().center())
+
+    def connect(self, window):
+        if self.restore:
+            window.project_controller.dataset_preview_ready.connect(self.raw_available)
+            window.processing_controller.run_result_ready.connect(self.result_available)
+            window.project_controller.artifact_preview_ready.connect(self.artifact_displayed)
+            window.processing_controller.run_finished.connect(self.processing_finished)
+
+    def advance(self, window):
+        now, mark, marks = self.now, self.mark, self.marks
+        if window.isVisible() and "first_paint" in marks:
+            self.beats.append(now())
+            if not window.splashScreen.isVisible():
+                mark("first_ui_tick_after_splash")
+                if "settings_click" not in marks:
+                    nav = window._top_nav.items["settingsInterface"]
+                    if nav.isEnabled() and nav.isVisible():
+                        mark("settings_click")
+                        self.click(nav)
+                        mark("settings_click_return")
+                elif window.stackedWidget.currentWidget().objectName() == "settingsInterface":
+                    mark("settings_event_loop_back")
+            if {"settings_paint", "settings_event_loop_back", "backend_ready", "pages_ready"} <= marks.keys():
+                if not self.restore or self.advance_processing(window):
+                    mark("all_conditions")
+                    if now() - marks["all_conditions"] >= 200:
+                        window.probe.stop()
+                        mark("close_requested")
+                        window.close()
+        if now() > 40000:
+            raise TimeoutError("startup workflow did not reach all milestones")
+
+    def raw_available(self, bundle):
+        if getattr(bundle, "matrix", None) is not None:
+            self.mark("raw_preview_ready")
+
+    def advance_processing(self, window):
+        mark, marks, audit = self.mark, self.marks, self.audit
+        if "raw_preview_ready" not in marks:
+            return False
+        nav = window._top_nav.items["processingInterface"]
+        if not nav.isEnabled() or not nav.isVisible():
+            return False
+        page = window.pages["processingInterface"]
+        if "processing_click" not in marks:
+            mark("processing_click")
+            self.click(nav)
+            if window.stackedWidget.currentWidget() is not page:
+                raise RuntimeError("processing navigation did not show the page")
+            return False
+        if "processing_submit" not in marks:
+            view = page._workspace.primary_view()
+            if view._matrix is None:
+                return False
+            mark("processing_view_ready")
+            page._pipeline_list.add_step("dewow", "Dewow", {"window": 11})
+            page._pipeline_list.add_step("trace_savgol_filter", "Savitzky-Golay",
+                                         {"window_traces": 7, "polyorder": 2})
+            page._result_name_edit.setText("startup-benchmark")
+            if not page._run_btn.isEnabled():
+                raise RuntimeError("the prepared processing chain cannot run")
+            mark("processing_submit")
+            self.click(page._run_btn)
+            return False
+        if audit.get("processing_error"):
+            raise RuntimeError(audit["processing_error"])
+        if not audit.get("processing_succeeded") or "artifact_shown" not in marks:
+            return False
+        if "processing_result_readable" not in marks:
+            import numpy as np
+
+            artifact = window.backend_controller.backend.projects.read_artifact_dataset(
+                window.project_controller.current_project_id, "L01", audit["artifact_id"])
+            matrix = np.asarray(artifact.data)
+            if matrix.shape != (128, 64) or matrix.dtype != np.float32 or not np.isfinite(matrix).all():
+                raise RuntimeError("unexpected processed dataset")
+            audit["result_sha256"] = hashlib.sha256(matrix.tobytes()).hexdigest()
+            mark("processing_result_readable")
+        return True
+
+    def result_available(self, _job_id, artifact_id):
+        self.audit["artifact_id"] = artifact_id
+
+    def artifact_displayed(self, artifact_id, bundle):
+        if artifact_id == self.audit.get("artifact_id") and getattr(bundle, "matrix", None) is not None:
+            self.mark("artifact_shown")
+
+    def processing_finished(self, succeeded, message):
+        self.audit["processing_succeeded"] = succeeded
+        if not succeeded:
+            self.audit["processing_error"] = message
+
+
 def child(repo, result, origin, restore):
-    sys.path.insert(0, str(repo))
     sys.argv = [str(repo / "app_qt.py")]
-    marks, spans, beats = {}, {}, []
-
-    def now():
-        return (time.perf_counter_ns() - origin) / 1e6
-
-    def mark(key):
-        marks.setdefault(key, now())
+    observation = StartupObservation(origin, restore)
+    now, mark = observation.now, observation.mark
+    marks, spans, audit, beats = observation.marks, observation.spans, observation.audit, observation.beats
 
     mark("before_import")
     import app_qt
     mark("after_import")
-    from PyQt6.QtCore import QEvent, QTimer, Qt
+    from PyQt6.QtCore import QEvent, QTimer
     from PyQt6.QtGui import QGuiApplication
-    from PyQt6.QtTest import QTest
-
-    audit = {}
 
     class Window(app_qt.MyGPRMainWindow):
         def __init__(self, *args, **kwargs):
@@ -56,11 +158,7 @@ def child(repo, result, origin, restore):
             mark("window_constructed")
             self._observed_settings = self.pages["settingsInterface"]
             self._observed_settings.installEventFilter(self)
-            if restore:
-                self.project_controller.dataset_preview_ready.connect(self.raw_available)
-                self.processing_controller.run_result_ready.connect(self.result_available)
-                self.project_controller.artifact_preview_ready.connect(self.artifact_displayed)
-                self.processing_controller.run_finished.connect(self.processing_finished)
+            observation.connect(self)
             self.probe = QTimer(self)
             self.probe.setInterval(25)
             self.probe.timeout.connect(self.observe)
@@ -97,93 +195,11 @@ def child(repo, result, origin, restore):
 
         def observe(self):
             try:
-                self.advance()
+                observation.advance(self)
             except Exception as error:  # Report probe failures before a normal window close.
                 audit["error"] = repr(error)
                 self.probe.stop()
                 self.close()
-
-        def advance(self):
-            if self.isVisible() and "first_paint" in marks:
-                beats.append(now())
-                if not self.splashScreen.isVisible():
-                    mark("first_ui_tick_after_splash")
-                    if "settings_click" not in marks:
-                        nav = self._top_nav.items["settingsInterface"]
-                        if nav.isEnabled() and nav.isVisible():
-                            mark("settings_click")
-                            QTest.mouseClick(nav, Qt.MouseButton.LeftButton, pos=nav.rect().center())
-                            mark("settings_click_return")
-                    elif self.stackedWidget.currentWidget().objectName() == "settingsInterface":
-                        mark("settings_event_loop_back")
-                if {"settings_paint", "settings_event_loop_back", "backend_ready", "pages_ready"} <= marks.keys():
-                    if not restore or self.advance_processing():
-                        mark("all_conditions")
-                        if now() - marks["all_conditions"] >= 200:
-                            self.probe.stop()
-                            mark("close_requested")
-                            self.close()
-            if now() > 40000:
-                raise TimeoutError("startup workflow did not reach all milestones")
-
-        def raw_available(self, bundle):
-            if getattr(bundle, "matrix", None) is not None:
-                mark("raw_preview_ready")
-
-        def advance_processing(self):
-            if "raw_preview_ready" not in marks:
-                return False
-            nav = self._top_nav.items["processingInterface"]
-            if not nav.isEnabled() or not nav.isVisible():
-                return False
-            page = self.pages["processingInterface"]
-            if "processing_click" not in marks:
-                mark("processing_click")
-                QTest.mouseClick(nav, Qt.MouseButton.LeftButton, pos=nav.rect().center())
-                if self.stackedWidget.currentWidget() is not page:
-                    raise RuntimeError("processing navigation did not show the page")
-                return False
-            if "processing_submit" not in marks:
-                view = page._workspace.primary_view()
-                if view._matrix is None:
-                    return False
-                mark("processing_view_ready")
-                page._pipeline_list.add_step("dewow", "Dewow", {"window": 11})
-                page._pipeline_list.add_step("trace_savgol_filter", "Savitzky-Golay",
-                                             {"window_traces": 7, "polyorder": 2})
-                page._result_name_edit.setText("startup-benchmark")
-                if not page._run_btn.isEnabled():
-                    raise RuntimeError("the prepared processing chain cannot run")
-                mark("processing_submit")
-                QTest.mouseClick(page._run_btn, Qt.MouseButton.LeftButton, pos=page._run_btn.rect().center())
-                return False
-            if audit.get("processing_error"):
-                raise RuntimeError(audit["processing_error"])
-            if not audit.get("processing_succeeded") or "artifact_shown" not in marks:
-                return False
-            if "processing_result_readable" not in marks:
-                import numpy as np
-
-                artifact = self.backend_controller.backend.projects.read_artifact_dataset(
-                    self.project_controller.current_project_id, "L01", audit["artifact_id"])
-                matrix = np.asarray(artifact.data)
-                if matrix.shape != (128, 64) or matrix.dtype != np.float32 or not np.isfinite(matrix).all():
-                    raise RuntimeError("unexpected processed dataset")
-                audit["result_sha256"] = hashlib.sha256(matrix.tobytes()).hexdigest()
-                mark("processing_result_readable")
-            return True
-
-        def result_available(self, _job_id, artifact_id):
-            audit["artifact_id"] = artifact_id
-
-        def artifact_displayed(self, artifact_id, bundle):
-            if artifact_id == audit.get("artifact_id") and getattr(bundle, "matrix", None) is not None:
-                mark("artifact_shown")
-
-        def processing_finished(self, succeeded, message):
-            audit["processing_succeeded"] = succeeded
-            if not succeeded:
-                audit["processing_error"] = message
 
         def closeEvent(self, event):
             result = super().closeEvent(event)
@@ -225,14 +241,16 @@ def measure(folder, sources, pairs, restore):
     if restore:
         fixture_env = isolated_environment(folder / "prepare")
         repo = str(sources["baseline"])
+        fixture_env["PYTHONPATH"] = repo
         with (folder / "prepare" / "console.log").open("w", encoding="utf-8") as stream:
-            subprocess.run([sys.executable, "-B", script, "--make-fixture", repo, str(fixture)],
+            subprocess.run([sys.executable, "-B", script, "--make-fixture", str(fixture)],
                            cwd=repo, env=fixture_env, stdout=stream, stderr=subprocess.STDOUT,
                            check=True, timeout=45)
     for index, version in enumerate(order, 1):
         run = folder / f"run-{index:02d}-{version}"
         run.mkdir()
         env = isolated_environment(run)
+        env["PYTHONPATH"] = str(sources[version])
         if restore:
             shutil.copytree(fixture, run / "project")
         config = Path(env["MYGPR_SETTINGS_FILE"])
@@ -317,6 +335,6 @@ if __name__ == "__main__":
         repo, result, origin, restore = sys.argv[2:]
         raise SystemExit(child(Path(repo), Path(result), int(origin), bool(int(restore))))
     if mode == ["--make-fixture"]:
-        prepare_fixture(Path(sys.argv[2]), Path(sys.argv[3]))
+        prepare_fixture(Path(sys.argv[2]))
     else:
         main()

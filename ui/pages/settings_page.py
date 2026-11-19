@@ -1,8 +1,6 @@
 """Application preferences with a searchable, display-only B-scan preview."""
 
-import math
 from contextlib import ExitStack
-from dataclasses import dataclass
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QPointF, QSignalBlocker, QStringListModel, Qt, QTimer, QUrl, pyqtSignal
@@ -36,7 +34,14 @@ from qfluentwidgets import (
 from ui import constants, file_dialogs
 from ui.page_scaffold import style_transparent_scroll
 from ui.settings_support import read_application_version as _read_version
-from ui.settings_support import settings_locations
+from ui.settings_support import (
+    SETTINGS_CATEGORIES,
+    SettingTarget,
+    deferred_setting_targets,
+    finite_setting_value,
+    match_setting_targets,
+    settings_locations,
+)
 from ui.widgets.settings_bscan_preview import SettingsBScanPreview
 from ui.widgets.settings_controls import (
     SettingsChoice,
@@ -56,55 +61,6 @@ _TVG_DB_STEPS = tuple(value / 2 for value in range(121))
 _TVG_POWER_STEPS = tuple(value / 100 for value in range(30, 301))
 _AGC_WINDOW_STEPS = tuple(range(constants.BSCAN_AGC_WINDOW_RANGE[0],
                                 constants.BSCAN_AGC_WINDOW_RANGE[1] + 1, 2))
-_CATEGORIES = {
-    'appearance': '外观与工作区',
-    'bscan': 'B-scan 显示',
-    'processing': '处理默认值',
-    'spatial': '空间与底图',
-    'storage': '存储与诊断',
-    'about': '关于与更新',
-}
-_DEFERRED_SEARCH = {
-    'appearance': (
-        ('主题', '浅色 深色 外观 颜色'),
-        ('恢复面板布局', '还原 默认 文件树 边栏 侧栏 窗口'),
-        ('查看快捷键', 'F1 键盘'),
-    ),
-    'processing': (
-        ('默认相对介电常数', '导入 εr'),
-        ('并行工作线程数', '并发 重启'),
-    ),
-    'spatial': (('自动预下载测线区域底图', '地图 下载 联网'),),
-    'storage': (
-        ('默认项目根目录', '路径 新建 项目'),
-        ('设置文件目录', '配置'),
-        ('日志目录', '错误 log'),
-        ('底图缓存目录', '瓦片 缓存'),
-        ('诊断摘要', '排查 版本'),
-    ),
-    'about': (('使用手册', '帮助 文档'), ('应用更新', '检查更新 发布 安装版')),
-}
-
-
-@dataclass(frozen=True)
-class _SettingTarget:
-    label: str
-    category: str
-    control: QWidget | None
-    keywords: str = ''
-    disclosure: SettingsDisclosure | None = None
-
-    @property
-    def caption(self) -> str:
-        return f'{self.label}    {_CATEGORIES[self.category]}'
-
-
-def _finite(value, default: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return default
-    return number if math.isfinite(number) else default
 
 
 def _name(widget: QWidget, name: str, accessible: str) -> None:
@@ -142,13 +98,10 @@ class SettingsPage(QWidget):
         self._running_workers = None
         self._active_category = 'bscan'
         self._preview_wide = None
-        self._targets = {
-            (category, label): _SettingTarget(label, category, None, keywords)
-            for category, entries in _DEFERRED_SEARCH.items() for label, keywords in entries
-        }
-        self._matches: list[_SettingTarget] = []
+        self._targets = deferred_setting_targets()
+        self._matches: list[SettingTarget] = []
         self._highlighted: QWidget | None = None
-        self._pending_focus: _SettingTarget | None = None
+        self._pending_focus: SettingTarget | None = None
         self._focus_timer = QTimer(self)
         self._focus_timer.setSingleShot(True)
         self._focus_timer.timeout.connect(self._reveal)
@@ -201,7 +154,7 @@ class SettingsPage(QWidget):
         self._category_choice = ComboBox(header)
         self._protect_scroll_input(self._category_choice)
         _name(self._category_choice, 'settingsCategories', '设置分类')
-        for key, label in _CATEGORIES.items():
+        for key, label in SETTINGS_CATEGORIES.items():
             self._category_choice.addItem(label, userData=key)
         self._category_choice.currentIndexChanged.connect(
             lambda _index: self._select_category(self._category_choice.currentData()))
@@ -237,7 +190,7 @@ class SettingsPage(QWidget):
         nav.setContentsMargins(10, 10, 10, 0)
         nav.setSpacing(3)
         self._category_buttons = QButtonGroup(sidebar)
-        for key, label in _CATEGORIES.items():
+        for key, label in SETTINGS_CATEGORIES.items():
             button = QPushButton(label, sidebar)
             button.setProperty('settingsRole', 'nav')
             button.setCheckable(True)
@@ -256,7 +209,7 @@ class SettingsPage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(22, 14, 22, 22)
         layout.setSpacing(9)
-        layout.addWidget(settings_label(_CATEGORIES[key], 'title'))
+        layout.addWidget(settings_label(SETTINGS_CATEGORIES[key], 'title'))
         if description:
             layout.addWidget(settings_label(description, 'hint', wrap=True))
         scroll.setWidget(panel)
@@ -386,7 +339,7 @@ class SettingsPage(QWidget):
         key = (category, label)
         if key in self._targets:
             keywords = self._targets[key].keywords
-        self._targets[key] = _SettingTarget(label, category, control, keywords, disclosure)
+        self._targets[key] = SettingTarget(label, category, control, keywords, disclosure)
 
     def _build_appearance(self, key: str) -> None:
         layout = self._category(key)
@@ -685,15 +638,13 @@ class SettingsPage(QWidget):
         self._active_category = key
         self._nav_buttons[key].setChecked(True)
         with QSignalBlocker(self._category_choice):
-            self._category_choice.setCurrentIndex(list(_CATEGORIES).index(key))
+            self._category_choice.setCurrentIndex(list(SETTINGS_CATEGORIES).index(key))
         for category, scroll in self._panels.items():
             scroll.setVisible(category == key)
 
     def _search_changed(self, text: str) -> None:
         words = text.casefold().split()
-        self._matches = [target for category in _CATEGORIES for target in self._targets.values()
-                         if target.category == category and words and
-                         all(word in (target.caption + ' ' + target.keywords).casefold() for word in words)]
+        self._matches = match_setting_targets(self._targets, words)
         self._search_model.setStringList([target.caption for target in self._matches])
         self._empty_search.setVisible(bool(words and not self._matches))
         if self._matches:
@@ -710,7 +661,7 @@ class SettingsPage(QWidget):
         if target is not None:
             self._go_to_target(target)
 
-    def _go_to_target(self, target: _SettingTarget) -> None:
+    def _go_to_target(self, target: SettingTarget) -> None:
         with QSignalBlocker(self._search):
             self._search.clear()
         self._search_changed('')
@@ -745,7 +696,7 @@ class SettingsPage(QWidget):
             row.style().polish(row)
 
     def focus_bscan_settings(self) -> None:
-        self._go_to_target(_SettingTarget('颜色映射', 'bscan', self._bscan_cmap_combo))
+        self._go_to_target(SettingTarget('颜色映射', 'bscan', self._bscan_cmap_combo))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -930,8 +881,8 @@ class SettingsPage(QWidget):
         if scope == 'theme':
             self.set_theme_text(str(values.get('theme', constants.THEME_LIGHT)))
         elif scope == 'general':
-            dielectric = _finite(values.get('default_dielectric'), constants.DEFAULT_DIELECTRIC)
-            workers = int(_finite(values.get('max_workers'), constants.MAX_WORKERS))
+            dielectric = finite_setting_value(values.get('default_dielectric'), constants.DEFAULT_DIELECTRIC)
+            workers = int(finite_setting_value(values.get('max_workers'), constants.MAX_WORKERS))
             self._general = {'default_dielectric': round(min(max(dielectric, 1.0), 81.0), 2),
                              'max_workers': min(max(workers, 1), 8),
                              'auto_prefetch_basemap': bool(values.get('auto_prefetch_basemap', True))}
@@ -994,7 +945,7 @@ class SettingsPage(QWidget):
             for spin, key, default in spins:
                 if key in values or initial:
                     signals.enter_context(QSignalBlocker(spin))
-                    spin.setValue(_finite(values.get(key), default if initial else spin.value()))
+                    spin.setValue(finite_setting_value(values.get(key), default if initial else spin.value()))
             for check, key in checks:
                 if key in values or initial:
                     signals.enter_context(QSignalBlocker(check))
@@ -1002,8 +953,8 @@ class SettingsPage(QWidget):
             signals.enter_context(QSignalBlocker(self._bscan_contrast_slider))
             self._bscan_contrast_slider.setValue(round(100 * self._bscan_contrast_spin.value()))
             if initial or 'bscan_p_low' in values or 'bscan_p_high' in values:
-                low = _finite(values.get('bscan_p_low'), self._percentiles[0])
-                high = _finite(values.get('bscan_p_high'), self._percentiles[1])
+                low = finite_setting_value(values.get('bscan_p_low'), self._percentiles[0])
+                high = finite_setting_value(values.get('bscan_p_high'), self._percentiles[1])
                 if 0 <= low < high <= 100:
                     self._percentiles = low, high
                 elif initial:

@@ -189,7 +189,9 @@ class TestSettingsGeneralPersist:
         assert set(page._panels) == {'bscan'}
         assert page.settings()['max_workers'] == 4
         assert page.settings()['project_root'] == 'D:/x'
-        page._search.setText('并行工作线程数')
+        query = '并行工作线程数'
+        page._search.setText(query)
+        page._search.textEdited.emit(query)
         assert 'processing' not in page._panels
         page._open_first_result()
         assert set(page._panels) == {'bscan', 'processing'}
