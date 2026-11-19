@@ -233,10 +233,13 @@ def key_chord(hwnd, key):
 def click(hwnd, location):
     if win32gui.GetForegroundWindow() != hwnd:
         raise RuntimeError("MyGPR lost foreground before clicking Run")
-    win32api.SetCursorPos(location)
+    x, y = win32gui.ScreenToClient(hwnd, location)
+    button_point = win32api.MAKELONG(x, y)
+    win32gui.PostMessage(hwnd, win32con.WM_MOUSEMOVE, 0, button_point)
     started = time.perf_counter()
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    win32gui.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, button_point)
+    time.sleep(.035)
+    win32gui.PostMessage(hwnd, win32con.WM_LBUTTONUP, 0, button_point)
     return started
 
 
@@ -287,8 +290,19 @@ def operate(hwnd, folder, fixture):
             return button
 
         location, marks["processing_ready"] = until(ready, "Restored pipeline Run button")
+        header, bounds, _ = screenshot(hwnd, run_region)
+        header.save(folder / "processing-ready.png")
+        write_json(folder / "run-target.json", {"screen_point": location, "header_bounds": bounds})
         marks["run_click"] = click(hwnd, location)
-        digest, marks["artifact_readable"] = until(lambda: read_result(folder), "First result readable")
+        try:
+            digest, marks["artifact_readable"] = until(lambda: read_result(folder), "First result readable", timeout=30)
+        except TimeoutError:
+            run_dir = folder / "project/processed/L01"
+            write_json(folder / "run-diagnostics.json", {
+                "files": [entry.name for entry in run_dir.glob("*")],
+                "run_button_still_blue": run_button(hwnd) is not None,
+            })
+            raise
         marks["result_sha256"] = digest
         # Let the app draw the result before retaining the evidence image.
         until(lambda: run_button(hwnd) is None, "Processing left its runnable state")
