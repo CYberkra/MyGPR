@@ -37,6 +37,8 @@ class FullscreenHost(QWidget):
         self._escape_shortcut = QShortcut(QKeySequence('Escape'), self)
         self._escape_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
         self._escape_shortcut.activated.connect(self._on_escape)
+        # 折叠瞬间回写全屏几何（settle 会先 release 再 emit，那时已是嵌入尺寸）
+        self._geometry_saver = None
 
     def take(self, guest: QWidget) -> None:
         if self._guest is not None:
@@ -112,6 +114,11 @@ class FullscreenHost(QWidget):
     def collapse(self) -> None:
         if self._guest is None or self.state in ('embedded', 'collapsing'):
             return
+        # 必须在释放 guest 之前取几何：此刻仍是全屏尺寸 + 所在屏幕，
+        # 供下次 expand 落到同一块屏。
+        saver = self._geometry_saver
+        if saver is not None:
+            saver(self.saveGeometry())
         self._animation.stop()
         self.state = 'collapsing'
         self._animate_to(self._embedded_rect(), 'embedded')
@@ -174,5 +181,11 @@ class FullscreenHost(QWidget):
         super().keyPressEvent(event)
 
     def closeEvent(self, event) -> None:
+        # 全屏中直接关窗不经过 collapse()，这里补一次几何回写。正常折叠时
+        # state 已是 'collapsing'，不会重复保存、也不会用嵌入尺寸覆盖好值。
+        if self.state in ('fullscreen', 'expanding'):
+            saver = self._geometry_saver
+            if saver is not None:
+                saver(self.saveGeometry())
         self.settle()
         event.accept()
