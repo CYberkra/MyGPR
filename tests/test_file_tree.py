@@ -14,6 +14,7 @@ pytest.importorskip("PyQt6")
 
 from PyQt6.QtCore import QEvent, QPointF, Qt  # noqa: E402
 from PyQt6.QtGui import QMouseEvent  # noqa: E402
+from PyQt6.QtWidgets import QAbstractItemView  # noqa: E402
 
 from ui.file_tree import (  # noqa: E402
     build_artifacts_model, build_files_model, build_project_model,
@@ -57,13 +58,16 @@ def test_line_suffix_derives_from_line_fields():
 
 
 def test_build_tree_model_flat_lines_sorted_by_id():
-    """测线平铺：无分组层，line_id 升序（排序与 updated_at 日期无关）。"""
+    """测线平铺并按编号自然排序，更新时间不影响顺序。"""
     nodes = build_tree_model([
+        _line('Line10'),
         _line('L09', '2026-09-16T01:20:58', processed_result='r'),
+        _line('Line2'),
         _line('L01', '2026-09-15T23:10:00'),
+        _line('Line1'),
     ])
-    assert [n.kind for n in nodes] == ['line', 'line']
-    assert [n.payload for n in nodes] == ['L01', 'L09']
+    assert all(n.kind == 'line' for n in nodes)
+    assert [n.payload for n in nodes] == ['L01', 'L09', 'Line1', 'Line2', 'Line10']
     assert nodes[1].suffix == '成果✓'
     assert nodes[0].suffix == ''
 
@@ -619,7 +623,7 @@ def test_rebuild_first_build_defaults(qapp, panel):
     tree = panel._tree
     assert tree.topLevelItem(0).isExpanded()      # 测线（有内容）
     assert all(not tree.topLevelItem(index).isExpanded() for index in (1, 2, 3))
-    assert tree.topLevelItem(0).child(0).isExpanded()  # 首次显示原始输入
+    assert not tree.topLevelItem(0).child(0).isExpanded()  # 等当前线同步后再展开
 
 
 # ------------------------------------------------ 状态圆点与右键菜单
@@ -792,6 +796,77 @@ def _source_item(panel, aid):
     raise AssertionError(f'artifact {aid} is absent')
 
 
+def test_active_source_reveals_its_path_and_preserves_manual_branches(panel):
+    panel.set_project_info(types.SimpleNamespace(name='来源分支'))
+    panel.set_lines([_line('L01'), _line('L02'), _line('L03')])
+    panel.set_artifacts([_v2_artifact('A'), _v2_artifact('B', 'A'),
+                         _v2_artifact('C', line_id='L02')])
+    assert _category(panel._tree, '测线').isExpanded()
+    assert all(not line.isExpanded() for line in panel._line_id_by_item.values())
+    assert not _source_item(panel, 'A').isExpanded()
+
+    panel._line_id_by_item['L02'].setExpanded(True)
+    panel.set_active_source('L01', 'B')
+    first = panel._line_id_by_item['L01']
+    assert first.isExpanded() and first.child(0).isExpanded()
+    assert _source_item(panel, 'A').isExpanded()
+    panel.set_reports([_report()])
+    assert panel._line_id_by_item['L02'].isExpanded()
+    assert not panel._line_id_by_item['L02'].child(0).isExpanded()
+    assert not panel._line_id_by_item['L03'].isExpanded()
+
+    panel._tree.setCurrentItem(_source_item(panel, 'B'))
+    panel._line_id_by_item['L01'].setExpanded(False)
+    panel.set_spatial_results([_spatial()])
+    assert not panel._line_id_by_item['L01'].isExpanded()
+
+
+def test_refresh_preserves_selected_result_and_top_visible_line(panel):
+    panel.set_project_info(types.SimpleNamespace(name='滚动中的测线'))
+    lines = [_line(f'L{n:02d}') for n in range(1, 81)]
+    panel.set_lines(lines)
+    panel.set_artifacts([_v2_artifact('A')])
+    panel.set_current_line('L01')
+    panel.set_active_source('L01', 'A')
+    tree = panel._tree
+    tree.setCurrentItem(_source_item(panel, 'A'))
+    tree.doItemsLayout()
+    anchor = panel._line_id_by_item['L40']
+    tree.scrollToItem(anchor, QAbstractItemView.ScrollHint.PositionAtTop)
+    anchor_y = tree.visualItemRect(anchor).top()
+    assert tree.itemAt(tree.viewport().width() // 2, 0) is anchor
+
+    panel.set_lines([_line('L00'), *lines])
+    assert tree.currentItem() is _source_item(panel, 'A')
+    restored = panel._line_id_by_item['L40']
+    assert tree.itemAt(tree.viewport().width() // 2, 0) is restored
+    assert tree.visualItemRect(restored).top() == anchor_y
+
+    panel.set_artifacts([])
+    assert tree.currentItem() is panel._line_id_by_item['L01']
+    _category(tree, '测线').setExpanded(False)
+    panel.set_current_line('L75')
+    assert tree.currentItem() is panel._line_id_by_item['L75']
+    assert _category(tree, '测线').isExpanded()
+    panel.set_current_line('L81')  # 导入或删除后，切线信号可先于测线列表到达
+    panel.set_lines([*lines, _line('L81')])
+    assert tree.currentItem() is panel._line_id_by_item['L81']
+    assert panel._line_id_by_item['L81'].isExpanded()
+
+
+def test_same_named_sibling_results_are_visibly_distinguishable(panel):
+    panel.set_project_info(types.SimpleNamespace(name='参数对比'))
+    panel.set_lines([_line('L01')])
+    first, second = _v2_artifact('A'), _v2_artifact('B')
+    second.manifest['params']['lineage'][0]['params']['window'] = 23
+    panel.set_artifacts([first, second, _v2_artifact('C', 'A')])
+    a, b = _source_item(panel, 'A'), _source_item(panel, 'B')
+    assert a.parent() is b.parent()
+    assert '11' in a.text(0) + a.text(1)
+    assert '23' in b.text(0) + b.text(1)
+    assert _source_item(panel, 'C').text(0) == '低频漂移校正'
+
+
 def _capture_source_menu(panel, monkeypatch, item):
     from PyQt6.QtCore import QPoint
     from qfluentwidgets import RoundMenu
@@ -873,7 +948,7 @@ def test_active_source_marker_preserves_suffix_and_is_distinct_from_tree_selecti
     panel.set_artifacts([_v2_artifact('A')])
     artifact = _source_item(panel, 'A')
     base = artifact.text(1)
-    input_suffix = f'{base} 输入'.strip()
+    input_suffix = f'{base} 处理输入'.strip()
     panel.set_active_source('L01', 'A')
     assert artifact.text(1) == input_suffix
     assert artifact.font(0).bold()
@@ -886,7 +961,7 @@ def test_active_source_marker_preserves_suffix_and_is_distinct_from_tree_selecti
     assert _source_item(panel, 'A').text(1) == base
     assert not _source_item(panel, 'A').font(0).bold()
     assert panel._line_id_by_item['L02'].text(1) == '成果✓'
-    assert panel._line_id_by_item['L02'].child(0).text(1) == '输入'
+    assert panel._line_id_by_item['L02'].child(0).text(1) == '处理输入'
 
 
 @pytest.mark.parametrize('aid,blocked', [('A', True), ('B', True), ('S', False)])
@@ -993,6 +1068,7 @@ def test_expanding_raw_arrow_does_not_activate_source(panel):
     panel.set_project_info(types.SimpleNamespace(name='branch arrow'))
     panel.set_lines([_line('L01')])
     panel.set_artifacts([_v2_artifact('A')])
+    panel._line_id_by_item['L01'].setExpanded(True)
     raw = _find_by_kind(panel._tree, 'raw')
     activated = []
     panel.raw_focus_requested.connect(activated.append)
@@ -1010,11 +1086,16 @@ def test_switch_project_drops_cached_sources_markers_and_task_placeholder(panel)
     panel.set_artifacts([_v2_artifact('A')])
     panel.set_active_source('L01', 'A')
     panel.set_processing_input('L01', 'A', True)
+    panel._tree.setCurrentItem(_source_item(panel, 'A'))
     panel.set_project_info(types.SimpleNamespace(project_id='second', name='second'))
     assert _find_by_kind(panel._tree, 'artifact') is None
     assert _find_by_kind(panel._tree, 'task') is None
     assert panel._active_source is None
     assert panel._processing_input is None
+    panel.set_lines([_line('L01')])
+    panel.set_artifacts([_v2_artifact('A')])
+    assert panel._tree.currentItem() is None
+    assert not panel._line_id_by_item['L01'].isExpanded()
 
 
 # ---------------------------------------------------------------- 名称列宽度

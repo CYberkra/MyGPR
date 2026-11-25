@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter, defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from datetime import datetime
+from functools import cache
 from typing import Any, Sequence
+from unicodedata import decimal
+from ui.desktop_backend_facade import method_catalog
 from ui.result_presentation import artifact_parameters, describe_artifact, method_name
 
 
@@ -117,6 +122,17 @@ def _report_node(package: Any) -> TreeNode:
         tooltip=f'文件：{count} 个\n日期：{generated or "—"}\n目录：{package_dir}')
 
 
+def _line_order(line_id: str) -> tuple:
+    parts: list[tuple[int, str]] = []
+    for part in re.split(r'(\d+)', line_id.casefold()):
+        if part.isdecimal():
+            digits = ''.join(str(decimal(char)) for char in part).lstrip('0')
+            parts.append((len(digits), digits))
+        else:
+            parts.append((0, part))
+    return tuple(parts), line_id
+
+
 def build_tree_model(lines: Sequence[Any], spatial_results: Sequence[Any] = (),
                      reports: Sequence[Any] = ()) -> list[TreeNode]:
     """测线视图装配器：平铺列出全部测线，line_id 升序（与日期无关）。
@@ -126,7 +142,7 @@ def build_tree_model(lines: Sequence[Any], spatial_results: Sequence[Any] = (),
     """
     ordered = sorted(
         (ln for ln in lines or ()),
-        key=lambda ln: str(getattr(ln, 'line_id', '') or ''))
+        key=lambda ln: _line_order(str(getattr(ln, 'line_id', '') or '')))
     return [_line_node(ln) for ln in ordered]
 
 
@@ -196,6 +212,91 @@ def artifact_step(artifact: Any) -> dict:
     return {}
 
 
+@cache
+def _parameter_fields() -> dict:
+    return {entry.method_id: {field['name']: field for field in entry.parameter_schema}
+            for entry in method_catalog()}
+
+
+def _saved_step_parameters(artifact: Any) -> dict[str, str]:
+    step = artifact_step(artifact)
+    params = step.get('params')
+    if not step.get('method_id') or not isinstance(params, Mapping):
+        return {}
+    fields = _parameter_fields().get(str(step['method_id']), {})
+    details = {}
+    for key, value in params.items():
+        if not isinstance(key, str) or not isinstance(value, (str, int, float, bool)):
+            continue
+        field = fields.get(key, {})
+        text = ('是' if value else '否') if isinstance(value, bool) else str(value)
+        text = str((field.get('choice_labels') or {}).get(str(value), text))
+        if text and len(text) <= 24 and text.isprintable():
+            details[key] = f"{field.get('label') or key} {text}"
+    return details
+
+
+def _saved_time(artifact: Any) -> str:
+    stored = getattr(artifact, 'created_at', '')
+    manifest = getattr(artifact, 'manifest', None)
+    if not stored and isinstance(manifest, Mapping):
+        stored = manifest.get('saved_at') or manifest.get('committed_at')
+    stamp = str(stored or '').strip()
+    try:
+        datetime.fromisoformat(stamp)
+    except ValueError:
+        return ''
+    return stamp.replace('T', ' ', 1)
+
+
+def _parameter_labels(title: str, ids: list[str], by_id: dict) -> dict[str, str]:
+    params = {aid: _saved_step_parameters(by_id[aid]) for aid in ids}
+    keys = sorted({key for details in params.values() for key in details})
+    diversity = {key: len({details.get(key) for details in params.values()}) for key in keys}
+    varying = sorted((key for key in keys if diversity[key] > 1), key=diversity.__getitem__, reverse=True)
+    labels = {}
+    for aid, details in params.items():
+        terms = [details[key] for key in varying if key in details][:2]
+        labels[aid] = ' · '.join([title, *terms])
+    return labels
+
+
+def _distinguish_siblings(nodes: tuple[TreeNode, ...], by_id: dict) -> tuple[TreeNode, ...]:
+    if len(nodes) < 2:
+        return nodes
+    groups = defaultdict(list)
+    for node in nodes:
+        groups[node.text].append(node.payload)
+    occupied = set(groups)  # A generated label must not take another sibling's original name.
+    renamed = {}
+    for title, ids in groups.items():
+        if len(ids) < 2:
+            continue
+        labels = _parameter_labels(title, ids, by_id)
+        counts = Counter(labels.values())
+        for aid, label in labels.items():
+            if counts[label] > 1 or label in occupied:
+                stamp = _saved_time(by_id[aid])
+                if stamp:
+                    labels[aid] = f'{label} · {stamp}'
+        counts = Counter(labels.values())
+        tail_width = 6
+        while len({aid[-tail_width:] for aid in ids}) < len(ids):
+            tail_width += 4
+        for aid, label in labels.items():
+            if counts[label] > 1 or label in occupied:
+                base = f'{label} · #{aid[-tail_width:]}'
+                label = base
+                number = 2
+                while label in occupied:  # A user can give a sibling this exact literal name.
+                    label = f'{base} ({number})'
+                    number += 1
+            renamed[aid] = label
+            occupied.add(label)
+    return tuple(replace(node, text=renamed[node.payload]) if node.payload in renamed else node
+                 for node in nodes)
+
+
 def build_lineage_model(artifacts: Sequence[Any], line_id: str) -> tuple[TreeNode, ...]:
     """Saved data forest: raw descendants and explicitly unknown origins.
 
@@ -203,25 +304,26 @@ def build_lineage_model(artifacts: Sequence[Any], line_id: str) -> tuple[TreeNod
     Build iteratively so long valid processing chains do not exhaust Python's stack.
     """
     by_id = {str(getattr(a, 'artifact_id', '')): a for a in artifacts or ()
-             if str(getattr(a, 'line_id', '')) == line_id and getattr(a, 'artifact_id', '')}
+             if str(getattr(a, 'line_id', '')) == line_id and bool(getattr(a, 'artifact_id', ''))}
     parents = {aid: artifact_direct_parent(a) for aid, a in by_id.items()}
     for aid, parent in list(parents.items()):
         if parent and parent not in by_id:
             parents[aid] = None
     checked = set()
     for start in by_id:
-        path, positions = [], {}
-        node = start
-        while node and node in parents and node not in checked:
-            if node in positions:
-                for cyclic in path[positions[node]:]:
+        path: list[str] = []
+        positions: dict[str, int] = {}
+        ancestor: str | None = start
+        while ancestor and ancestor in parents and ancestor not in checked:
+            if ancestor in positions:
+                for cyclic in path[positions[ancestor]:]:
                     parents[cyclic] = None
                 break
-            positions[node] = len(path)
-            path.append(node)
-            node = parents[node]
+            positions[ancestor] = len(path)
+            path.append(ancestor)
+            ancestor = parents[ancestor]
         checked.update(path)
-    children = {aid: [] for aid in by_id}
+    children: dict[str, list[str]] = {aid: [] for aid in by_id}
     roots, unknown = [], []
     for aid, parent in parents.items():
         if parent is None:
@@ -230,29 +332,32 @@ def build_lineage_model(artifacts: Sequence[Any], line_id: str) -> tuple[TreeNod
             roots.append(aid)
         else:
             children[parent].append(aid)
-    def order(aid):
+    def order(aid: str) -> tuple[str, str]:
         return (str(getattr(by_id[aid], 'created_at', '') or ''), aid)
-    built = {}
+    built: dict[str, TreeNode] = {}
+
+    def siblings(ids: Sequence[str]) -> tuple[TreeNode, ...]:
+        return _distinguish_siblings(tuple(built[aid] for aid in sorted(ids, key=order)), by_id)
+
     for root in roots + unknown:
         work = [(root, False)]
         while work:
             aid, ready = work.pop()
             if ready:
                 node = _artifact_node(by_id[aid], by_id)
-                built[aid] = replace(node, suffix='',
-                    children=tuple(built[c] for c in sorted(children[aid], key=order)))
+                built[aid] = replace(node, suffix='', children=siblings(children[aid]))
             else:
                 work.append((aid, True))
                 work.extend((c, False) for c in children[aid])
     raw = TreeNode(key=f'raw:{line_id}', kind='raw', text='原始输入',
                    payload=line_id, aux=line_id,
-                   children=tuple(built[a] for a in sorted(roots, key=order)))
+                   children=siblings(roots))
     nodes = [raw]
     if unknown:
         nodes.append(TreeNode(key=f'unknown:{line_id}', kind='group',
                     text='历史成果 · 缺少来源记录',
                     tooltip='缺少可靠的直接来源记录；可以查看或继续处理，不能推定历史父子关系',
-                    children=tuple(built[a] for a in sorted(unknown, key=order))))
+                    children=siblings(unknown)))
     return tuple(nodes)
 
 
