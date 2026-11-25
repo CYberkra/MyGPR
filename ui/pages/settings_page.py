@@ -523,7 +523,7 @@ class SettingsPage(QWidget):
             self._row(form, label, control)
             control.currentIndexChanged.connect(self._emit_bscan_changed)
             self._target(key, label, control, '坐标 轴单位 ' + keywords, self._axes)
-        form.addWidget(settings_label('预览固定使用道号和走时轴。', 'hint', wrap=True))
+        form.addWidget(settings_label('预览坐标使用降采样后的道号和采样点。', 'hint', wrap=True))
         layout.addWidget(self._axes)
 
     def _build_bscan_overlays(self, layout: QVBoxLayout, key: str) -> None:

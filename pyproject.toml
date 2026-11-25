@@ -49,7 +49,13 @@ exclude = ["tests*", "sample_data*", "experiments*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.toml", "*.md", "*.csv"]
-"ui" = ["resources/*.png", "resources/icons/light/*.svg", "resources/icons/dark/*.svg"]
+"ui" = [
+    "resources/*.png",
+    "resources/icons/light/*.svg",
+    "resources/icons/dark/*.svg",
+    "resources/settings_field_bscan.npz",
+    "resources/settings_field_bscan.md",
+]
 "mygpr.resources.config" = ["*.yaml", "*.json"]
 
 [tool.ruff]

@@ -71,6 +71,37 @@ def test_percentile_draft_is_excluded_from_other_display_changes(preferences):
     assert (saved.get('bscan_p_low'), saved.get('bscan_p_high')) == (6.0, 95.0)
 
 
+def test_settings_preview_compares_gain_on_the_same_field_samples(preferences, qapp):
+    prefs, _, page = preferences
+    preview = page._preview
+    assert preview._view is None
+    page._bscan_gain_combo.setCurrentIndex(page._bscan_gain_combo.findData('tvg'))
+    page.show()
+    qapp.processEvents()
+
+    view = preview._view
+    raw = view._matrix
+    assert raw.shape == (256, 384)
+    assert raw.dtype == np.float32 and not raw.flags.writeable
+    assert raw[0, 0] == 20968.080078125
+    assert raw[42, 87] == -69743.71875
+    assert not view.distance_available() and view._sample_axis_for_ticks() is None
+    original = raw.copy()
+    current = view._image_item.image.copy()
+    assert view.gain_mode() == 'tvg'
+    assert abs(current[42, 87]) > abs(raw[42, 87])
+
+    preview._baseline.click()
+    assert view.gain_mode() == 'off'
+    assert prefs.settings.get('bscan_gain_mode') == 'tvg'
+    np.testing.assert_array_equal(view._image_item.image, original)
+    preview._current.click()
+    assert view.gain_mode() == 'tvg'
+    np.testing.assert_array_equal(view._image_item.image, current)
+    assert view._matrix is raw
+    np.testing.assert_array_equal(raw, original)
+
+
 def test_search_reveals_advanced_control_without_saving(preferences, qapp):
     prefs, _, page = preferences
     changes = []

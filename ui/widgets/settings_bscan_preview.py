@@ -1,13 +1,15 @@
-"""Ideal layered B-scan for comparing the workspace display settings."""
+"""Compare display settings on a bundled slice of measured radar data."""
 
-from dataclasses import replace
+from importlib.resources import files
+import logging
+from zipfile import BadZipFile
 
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ui.constants import BSCAN_AGC_KEYS, BSCAN_GAIN_KEYS, BSCAN_TVG_NODES
-from ui.desktop_backend_facade import build_preview_bundle
+from ui.desktop_backend_facade import manual_gain_preview_bundle
 from ui.design_tokens import tokens
 from ui.settings_manager import DEFAULT_SETTINGS
 from ui.widgets.bscan_view import BScanView
@@ -16,31 +18,18 @@ from ui.widgets.bscan_view import BScanView
 _LEVEL_KEYS = ('bscan_p_low', 'bscan_p_high')
 _DISPLAY_KEYS = ('bscan_colormap', 'bscan_contrast', 'bscan_colorbar_visible', *_LEVEL_KEYS, *BSCAN_GAIN_KEYS)
 _BASELINE = {'bscan_gain_mode': 'off', 'bscan_contrast': 1.0, 'bscan_p_low': 2.0, 'bscan_p_high': 98.0}
+_SOURCE_LABEL = '佩里托莫雷诺冰川 · 降采样'
 
 
-def _ideal_bundle():
-    """Three separated Ricker echoes with successively weaker amplitudes."""
-    time_window_ns = 120.0
-    sample_axis = np.linspace(0.0, time_window_ns, 241)
-    position = np.linspace(-1.0, 1.0, 180)
-    time = sample_axis[:, None]
-    matrix = np.zeros((sample_axis.size, position.size), dtype=np.float64)
-    for arrival_ns, width_ns, amplitude in (
-        (18.0, 2.2, 0.70),
-        (52.0 + 5.0 * position, 2.5, 0.20),
-        (91.0 + 5.0 * position**2, 3.0, 0.036),
-    ):
-        offset = (time - arrival_ns) / width_ns
-        squared = offset**2
-        matrix += amplitude * (1.0 - 2.0 * squared) * np.exp(-squared)
-    matrix = matrix.astype(np.float32)
+def _field_bundle():
+    """Load the offline sample by index, with no inferred physical axis."""
+    resource = files('ui').joinpath('resources', 'settings_field_bscan.npz')
+    with resource.open('rb') as source, np.load(source, allow_pickle=False) as archive:
+        matrix = archive['matrix']
+    if matrix.shape != (256, 384) or matrix.dtype != np.dtype('<f4') or not np.isfinite(matrix).all():
+        raise ValueError('Invalid settings B-scan sample')
     matrix.setflags(write=False)
-    bundle = build_preview_bundle(
-        'settings-ideal-bscan', matrix, time_axis_ns=sample_axis, time_window_ns=time_window_ns,
-    )
-    return replace(
-        bundle, x_label='道号', y_label='双程走时 (ns)', sample_axis_label='双程走时 (ns)',
-    )
+    return manual_gain_preview_bundle(matrix, {})
 
 
 class _StaticBScanView(BScanView):
@@ -49,7 +38,7 @@ class _StaticBScanView(BScanView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName('settingsBscanView')
-        self.setAccessibleName('理想雷达剖面')
+        self.setAccessibleName('实测雷达剖面')
         self.setMinimumHeight(230)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -69,9 +58,10 @@ class SettingsBScanPreview(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName('settingsBscanPreview')
-        self.setAccessibleName('理想剖面 B-scan 显示预览')
+        self.setAccessibleName('实测剖面 B-scan 显示预览')
         self.setMinimumWidth(270)
         self._view = None
+        self._load_failed = False
         self._preferences = {key: DEFAULT_SETTINGS[key] for key in _DISPLAY_KEYS}
         self._rendered = {}
         self._redraw = QTimer(self)
@@ -83,8 +73,9 @@ class SettingsBScanPreview(QFrame):
         self._layout.setContentsMargins(12, 12, 12, 9)
         self._layout.setSpacing(7)
         header = QHBoxLayout()
-        title = QLabel('理想剖面', self)
+        title = QLabel('实测剖面', self)
         title.setObjectName('settingsBscanTitle')
+        title.setToolTip('PeritoMoreno_1 · Koch 等 · CC BY 4.0')
         header.addWidget(title)
         header.addStretch(1)
         self._current = QPushButton('当前显示', self)
@@ -148,10 +139,23 @@ class SettingsBScanPreview(QFrame):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._view is None:
+            try:
+                bundle = _field_bundle()
+            except (OSError, ValueError, KeyError, EOFError, BadZipFile):
+                logging.getLogger(__name__).warning('无法加载设置页实测预览', exc_info=True)
+                self._load_failed = True
+                self._current.setEnabled(False)
+                self._baseline.setEnabled(False)
+                self._update_caption()
+                return
             self._view = _StaticBScanView(self)
             self._view.apply_theme(self._dark)
-            self._view.set_bundle(_ideal_bundle())
+            self._view.set_bundle(bundle)
             self._layout.insertWidget(1, self._view, 1)
+            self._load_failed = False
+            self._current.setEnabled(True)
+            self._baseline.setEnabled(True)
+            self._update_caption()
         self._refresh()
 
     def _display_values(self, *, baseline: bool) -> dict:
@@ -175,10 +179,12 @@ class SettingsBScanPreview(QFrame):
         self._refresh()
 
     def _update_caption(self) -> None:
-        if self._baseline.isChecked():
+        if self._load_failed:
+            self._caption.setText('实测预览资源不可用。')
+        elif self._baseline.isChecked():
             self._caption.setText('基准关闭增益，使用对比度 1 和百分位 2–98。')
         else:
-            self._caption.setText('三条反射的原始幅值由浅到深递减。')
+            self._caption.setText(_SOURCE_LABEL)
 
     def _refresh(self) -> None:
         if self._view is None or not self.isVisible():
