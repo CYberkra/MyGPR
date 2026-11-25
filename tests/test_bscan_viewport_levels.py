@@ -97,10 +97,16 @@ def test_full_resolution_bundle_reuses_exact_levels_only_for_matching_pixels(qap
         view.deleteLater()
 
 
-def test_mutable_parent_can_change_levels_after_bundle_creation():
+@pytest.mark.parametrize('foreign_buffer', [False, True])
+def test_mutable_parent_can_change_levels_after_bundle_creation(foreign_buffer):
     raw = np.arange(20, dtype=np.float32).reshape(5, 4)
-    read_only_view = raw.view()
-    read_only_view.setflags(write=False)
+    if foreign_buffer:
+        storage = bytearray(raw.tobytes())
+        raw = np.frombuffer(storage, dtype=np.float32).reshape(5, 4)
+        read_only_view = np.frombuffer(memoryview(storage).toreadonly(), dtype=np.float32).reshape(5, 4)
+    else:
+        read_only_view = raw.view()
+        read_only_view.setflags(write=False)
     bundle = make_preview_bundle(read_only_view)
     assert bundle.level_percentiles is None
     raw.fill(100)

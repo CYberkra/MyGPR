@@ -58,6 +58,10 @@
 
 容量样本每道映射回 L09 的 `j % 2378`，用来检查多 GiB 导入和资源保护。大文件的两份原生报告在 `native-capacity-perito-real/report.json` 和 `native-capacity-2gib-default-r2/report.json`。计时为本机单次观测。
 
+追加复核在处理页从 L09 切到正在读取的实测航次，并记录原始预览送达 GUI 的测线身份。修复前，同一项目的 L09 预览有一次在当前测线已切换后才投递。修复后的成功、失败与版本信息在 GUI 线程重新核验请求代次，对比来源继续按各自请求标识交付。验收记录中的两次成功预览均属于当时的活动测线。
+
+将 L09 作为对比来源拖入同一组后，用方向键交替选择两个已缓存来源。附加剖析表明，原界面在装载已知精确色阶的完整矩阵时重复计算百分位，两次切回大剖面的首次画布 Qt Paint 为 3,643.91／3,499.63 ms。复用色阶后为 19.05／17.29 ms。全分辨率数据与两处高道号拾取保持一致，四次下划线均走完 160 ms，额外预览请求为 0。仅输入像元和百分位相同才复用精确结果。该时间记录为 Qt 绘制事件到达，不含显示器呈现。原始报告见 `native-capacity-perito-scoped/report.json` 和 `native-capacity-perito-level-reuse/report.json`。
+
 ## CI 补验
 
 初次 [MyGPR CI](https://github.com/CYberkra/MyGPR/actions/runs/45555274375) 对应 `888268e77485180483b28e4c623b7680caa864b5`。后端、Python 3.12 后端矩阵和干净安装通过，Windows 与 Linux GUI 都在同一测线对比回归首次中止。Windows 实窗复现显示，前一次 Drop 创建的分组尚在等待 Qt 显示与布局事件，第二次合成 DragEnter 已提前送到不可见视口。补验开始前让 Qt 处理这批事件，并继续断言落区提示可见、包含对应测线名称、Drop 后即时清除。

@@ -206,11 +206,15 @@ def _downsample_axis(axis: Any, step: int, expected: int) -> np.ndarray | None:
 
 def _readonly_level_percentiles(matrix, low, high) -> tuple[float, float] | None:
     # A read-only slice can still have a writable parent.
-    while isinstance(matrix, np.ndarray):
+    while True:
         if matrix.flags.writeable:
             return None
-        matrix = matrix.base
-    return float(low), float(high)
+        parent = matrix.base
+        if not isinstance(parent, np.ndarray):
+            if parent is None or isinstance(parent, bytes) or isinstance(matrix, np.memmap):
+                return float(low), float(high)
+            return None  # A foreign buffer can have other writers.
+        matrix = parent
 
 
 def make_preview_bundle(
