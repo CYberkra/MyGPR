@@ -156,6 +156,10 @@ class ProjectChain:
             pc.preview_failed.connect(
                 lambda msg: self._co.infobar('error', '成果预览失败', msg))
             pc.dataset_preview_ready.connect(self.on_dataset_preview)
+            preview = getattr(co.page('settingsInterface'), 'bscan_preview', None)
+            if preview is not None and hasattr(pc, 'settings_preview_ready'):
+                preview.preview_requested.connect(pc.preview_settings_line)
+                pc.settings_preview_ready.connect(preview.set_result)
             if hasattr(pc, "preview_context_failed"):
                 pc.preview_context_failed.connect(self._quality_preview_failed)
             pc.artifact_preview_ready.connect(self.on_artifact_preview)
@@ -327,6 +331,7 @@ class ProjectChain:
         self._reset_interpretation()
         self.current_line_id = ''
         self._restore_line_id = ''
+        self._update_settings_preview_context()
         # 关闭项目即重置轨迹去重态：否则重新打开**同一个**项目时，测线集合
         # 与上次相同 → 会被误判为"无需重载"，空间页停在空轨迹。
         self._spatial_reload_pending = False
@@ -392,6 +397,13 @@ class ProjectChain:
         co.page('interpretationInterface').set_line_label(self.current_line_id)
         if co.file_tree() is not None:
             co.file_tree().set_current_line(self.current_line_id)
+        self._update_settings_preview_context()
+
+    def _update_settings_preview_context(self) -> None:
+        co = self._co
+        preview = getattr(co.page('settingsInterface'), 'bscan_preview', None)
+        if preview is not None:
+            preview.set_context(str(co.current_project_id() or ''), self.current_line_id)
 
     def invalidate_spatial_tracks(self) -> None:
         """A sensor update can change tracks without changing line IDs."""

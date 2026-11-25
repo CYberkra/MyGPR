@@ -313,7 +313,7 @@ class SettingsPage(QWidget):
             value = steps[position]
             live_value.setText(format_value(value))
             value_stack.setCurrentWidget(live_value)
-            self._preview.set_preferences(self.bscan_view_settings() | {key: value})
+            self.bscan_preview.set_preferences(self.bscan_view_settings() | {key: value})
 
         def finish_drag() -> None:
             value_stack.setCurrentWidget(spin)
@@ -371,8 +371,8 @@ class SettingsPage(QWidget):
         self._bscan_controls = QWidget()
         form = _column(self._bscan_controls)
         self._build_bscan_direct(form, key)
-        self._preview = SettingsBScanPreview()
-        self._preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.bscan_preview = SettingsBScanPreview()
+        self.bscan_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._bscan_advanced = QWidget()
         advanced = _column(self._bscan_advanced)
         self._build_bscan_levels(advanced, key)
@@ -523,7 +523,7 @@ class SettingsPage(QWidget):
             self._row(form, label, control)
             control.currentIndexChanged.connect(self._emit_bscan_changed)
             self._target(key, label, control, '坐标 轴单位 ' + keywords, self._axes)
-        form.addWidget(settings_label('预览坐标使用降采样后的道号和采样点。', 'hint', wrap=True))
+        form.addWidget(settings_label('预览使用当前测线的道号和采样轴。', 'hint', wrap=True))
         layout.addWidget(self._axes)
 
     def _build_bscan_overlays(self, layout: QVBoxLayout, key: str) -> None:
@@ -711,11 +711,11 @@ class SettingsPage(QWidget):
         if wide == self._preview_wide:
             return
         self._preview_wide = wide
-        self._preview.setMinimumHeight(366 if wide else 285)
-        for widget in (self._bscan_controls, self._preview, self._bscan_advanced):
+        self.bscan_preview.setMinimumHeight(366 if wide else 285)
+        for widget in (self._bscan_controls, self.bscan_preview, self._bscan_advanced):
             self._preview_grid.removeWidget(widget)
         self._preview_grid.addWidget(self._bscan_controls, 0, 0, Qt.AlignmentFlag.AlignTop)
-        self._preview_grid.addWidget(self._preview, 0 if wide else 1, int(wide),
+        self._preview_grid.addWidget(self.bscan_preview, 0 if wide else 1, int(wide),
                                      2 if wide else 1, 1, Qt.AlignmentFlag.AlignTop)
         self._preview_grid.addWidget(self._bscan_advanced, 1 if wide else 2, 0, Qt.AlignmentFlag.AlignTop)
         self._preview_grid.setColumnStretch(0, 1)
@@ -736,7 +736,7 @@ class SettingsPage(QWidget):
         self._emit_bscan_changed()
 
     def _preview_contrast(self, value: int) -> None:
-        self._preview.set_preferences(self.bscan_view_settings() | {'bscan_contrast': value / 100})
+        self.bscan_preview.set_preferences(self.bscan_view_settings() | {'bscan_contrast': value / 100})
 
     def _sync_bscan_details(self) -> None:
         mode = self._bscan_gain_combo.currentData()
@@ -784,7 +784,7 @@ class SettingsPage(QWidget):
         self._refresh_preview()
 
     def _refresh_preview(self) -> None:
-        self._preview.set_preferences(self.bscan_view_settings())
+        self.bscan_preview.set_preferences(self.bscan_view_settings())
 
     def _bind_general(self, key, control, signal) -> None:
         self._general_controls[key] = control

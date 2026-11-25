@@ -1,15 +1,11 @@
-"""Compare display settings on a bundled slice of measured radar data."""
+"""Compare display settings on a bounded preview of the active project line."""
 
-from importlib.resources import files
-import logging
-from zipfile import BadZipFile
+from uuid import uuid4
 
-import numpy as np
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ui.constants import BSCAN_AGC_KEYS, BSCAN_GAIN_KEYS, BSCAN_TVG_NODES
-from ui.desktop_backend_facade import manual_gain_preview_bundle
 from ui.design_tokens import tokens
 from ui.settings_manager import DEFAULT_SETTINGS
 from ui.widgets.bscan_view import BScanView
@@ -18,18 +14,6 @@ from ui.widgets.bscan_view import BScanView
 _LEVEL_KEYS = ('bscan_p_low', 'bscan_p_high')
 _DISPLAY_KEYS = ('bscan_colormap', 'bscan_contrast', 'bscan_colorbar_visible', *_LEVEL_KEYS, *BSCAN_GAIN_KEYS)
 _BASELINE = {'bscan_gain_mode': 'off', 'bscan_contrast': 1.0, 'bscan_p_low': 2.0, 'bscan_p_high': 98.0}
-_SOURCE_LABEL = '佩里托莫雷诺冰川 · 降采样'
-
-
-def _field_bundle():
-    """Load the offline sample by index, with no inferred physical axis."""
-    resource = files('ui').joinpath('resources', 'settings_field_bscan.npz')
-    with resource.open('rb') as source, np.load(source, allow_pickle=False) as archive:
-        matrix = archive['matrix']
-    if matrix.shape != (256, 384) or matrix.dtype != np.dtype('<f4') or not np.isfinite(matrix).all():
-        raise ValueError('Invalid settings B-scan sample')
-    matrix.setflags(write=False)
-    return manual_gain_preview_bundle(matrix, {})
 
 
 class _StaticBScanView(BScanView):
@@ -38,7 +22,7 @@ class _StaticBScanView(BScanView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName('settingsBscanView')
-        self.setAccessibleName('实测雷达剖面')
+        self.setAccessibleName('当前测线雷达剖面')
         self.setMinimumHeight(230)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -55,13 +39,18 @@ class _StaticBScanView(BScanView):
 class SettingsBScanPreview(QFrame):
     """Compare the saved appearance against a local, non-persisted baseline."""
 
+    preview_requested = pyqtSignal(str, str, str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName('settingsBscanPreview')
-        self.setAccessibleName('实测剖面 B-scan 显示预览')
+        self.setAccessibleName('当前测线 B-scan 显示预览')
         self.setMinimumWidth(270)
         self._view = None
-        self._load_failed = False
+        self._context = ('', '')
+        self._request_id = ''
+        self._ready = False
+        self._error = ''
         self._preferences = {key: DEFAULT_SETTINGS[key] for key in _DISPLAY_KEYS}
         self._rendered = {}
         self._redraw = QTimer(self)
@@ -73,9 +62,8 @@ class SettingsBScanPreview(QFrame):
         self._layout.setContentsMargins(12, 12, 12, 9)
         self._layout.setSpacing(7)
         header = QHBoxLayout()
-        title = QLabel('实测剖面', self)
+        title = QLabel('测线预览', self)
         title.setObjectName('settingsBscanTitle')
-        title.setToolTip('PeritoMoreno_1 · Koch 等 · CC BY 4.0')
         header.addWidget(title)
         header.addStretch(1)
         self._current = QPushButton('当前显示', self)
@@ -86,6 +74,7 @@ class SettingsBScanPreview(QFrame):
         self._modes = QButtonGroup(self)
         for button in (self._current, self._baseline):
             button.setCheckable(True)
+            button.setEnabled(False)
             self._modes.addButton(button)
             header.addWidget(button)
         self._current.setChecked(True)
@@ -138,24 +127,51 @@ class SettingsBScanPreview(QFrame):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._request_preview()
+        self._refresh()
+
+    def set_context(self, project_id: str, line_id: str) -> None:
+        context = project_id, line_id
+        if context == self._context:
+            return
+        self._context = context
+        self._request_id = self._error = ''
+        self._ready = False
+        self._redraw.stop()
+        if self._view is not None:
+            self._view.clear()
+            self._view.hide()
+        self._current.setEnabled(False)
+        self._baseline.setEnabled(False)
+        self._update_caption()
+        self._request_preview()
+
+    def _request_preview(self) -> None:
+        if not self.isVisible() or not all(self._context) or self._request_id or self._ready:
+            return
+        self._error = ''
+        self._request_id = uuid4().hex
+        self._update_caption()
+        self.preview_requested.emit(*self._context, self._request_id)
+
+    def set_result(self, project_id: str, line_id: str, token: str, bundle, error: str) -> None:
+        if (project_id, line_id) != self._context or not token or token != self._request_id:
+            return
+        self._request_id = ''
+        if bundle is None:
+            self._error = error or '没有可预览的数据'
+            self._update_caption()
+            return
         if self._view is None:
-            try:
-                bundle = _field_bundle()
-            except (OSError, ValueError, KeyError, EOFError, BadZipFile):
-                logging.getLogger(__name__).warning('无法加载设置页实测预览', exc_info=True)
-                self._load_failed = True
-                self._current.setEnabled(False)
-                self._baseline.setEnabled(False)
-                self._update_caption()
-                return
             self._view = _StaticBScanView(self)
             self._view.apply_theme(self._dark)
-            self._view.set_bundle(bundle)
             self._layout.insertWidget(1, self._view, 1)
-            self._load_failed = False
-            self._current.setEnabled(True)
-            self._baseline.setEnabled(True)
-            self._update_caption()
+        self._view.set_bundle(bundle)
+        self._view.show()
+        self._ready = True
+        self._current.setEnabled(True)
+        self._baseline.setEnabled(True)
+        self._update_caption()
         self._refresh()
 
     def _display_values(self, *, baseline: bool) -> dict:
@@ -179,15 +195,21 @@ class SettingsBScanPreview(QFrame):
         self._refresh()
 
     def _update_caption(self) -> None:
-        if self._load_failed:
-            self._caption.setText('实测预览资源不可用。')
+        line_id = self._context[1]
+        self._caption.setToolTip(self._error)
+        if self._error:
+            self._caption.setText(f'无法读取测线 {line_id} 的预览。')
+        elif self._request_id:
+            self._caption.setText(f'正在读取测线 {line_id}…')
+        elif not self._ready:
+            self._caption.setText('导入并选择测线后即可预览。')
         elif self._baseline.isChecked():
-            self._caption.setText('基准关闭增益，使用对比度 1 和百分位 2–98。')
+            self._caption.setText(f'测线 {line_id} · 基准关闭增益，使用对比度 1 和百分位 2–98。')
         else:
-            self._caption.setText(_SOURCE_LABEL)
+            self._caption.setText(f'测线 {line_id} · 原始数据降采样')
 
     def _refresh(self) -> None:
-        if self._view is None or not self.isVisible():
+        if not self._ready or not self.isVisible():
             return
         state = self._display_values(baseline=self._baseline.isChecked())
         changed = {key for key, value in state.items() if value != self._rendered.get(key)}

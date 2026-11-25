@@ -8,6 +8,7 @@ pytest.importorskip('PyQt6')
 from PyQt6.QtCore import QCoreApplication, QEvent, QPointF, QRectF
 from PyQt6.QtWidgets import QWidget
 
+from core.gui_rendering import make_preview_bundle
 from ui.desktop_backend_facade import compute_display_levels
 from ui.main_window_bscan_prefs import BScanPreferenceMixin
 from ui.pages.settings_page import SettingsPage
@@ -71,25 +72,51 @@ def test_percentile_draft_is_excluded_from_other_display_changes(preferences):
     assert (saved.get('bscan_p_low'), saved.get('bscan_p_high')) == (6.0, 95.0)
 
 
-def test_settings_preview_compares_gain_on_the_same_field_samples(preferences, qapp):
+def test_settings_preview_only_compares_the_latest_current_line(preferences, qapp):
     prefs, _, page = preferences
-    preview = page._preview
-    assert preview._view is None
+    preview = page.bscan_preview
+    requests = []
+    preview.preview_requested.connect(lambda *args: requests.append(args))
+
+    def field_bundle(offset):
+        matrix = np.arange(48, dtype=np.float32).reshape(6, 8) + offset
+        matrix.setflags(write=False)
+        return make_preview_bundle(matrix)
+
     page._bscan_gain_combo.setCurrentIndex(page._bscan_gain_combo.findData('tvg'))
     page.show()
     qapp.processEvents()
+    assert not requests
+    assert preview._view is None or preview._view._matrix is None
 
+    page.hide()
+    preview.set_context('project', 'A')
+    qapp.processEvents()
+    assert not requests
+    page.show()
+    qapp.processEvents()
+    preview.set_context('project', 'B')
+    qapp.processEvents()
+    preview.set_context('project', 'A')
+    qapp.processEvents()
+    assert [(project, line) for project, line, _ in requests] == [
+        ('project', 'A'), ('project', 'B'), ('project', 'A')]
+    first_a, request_b, latest_a = requests
+    assert first_a != latest_a
+
+    preview.set_result(*first_a, field_bundle(100), '')
+    assert preview._view is None or preview._view._matrix is None
+    newest = field_bundle(-72)
+    original = newest.matrix.copy()
+    preview.set_result(*latest_a, newest, '')
+    preview.set_result(*request_b, field_bundle(300), '')
+    qapp.processEvents()
     view = preview._view
     raw = view._matrix
-    assert raw.shape == (256, 384)
-    assert raw.dtype == np.float32 and not raw.flags.writeable
-    assert raw[0, 0] == 20968.080078125
-    assert raw[42, 87] == -69743.71875
-    assert not view.distance_available() and view._sample_axis_for_ticks() is None
-    original = raw.copy()
+    np.testing.assert_array_equal(raw, original)
     current = view._image_item.image.copy()
     assert view.gain_mode() == 'tvg'
-    assert abs(current[42, 87]) > abs(raw[42, 87])
+    assert abs(current[-1, 0]) > abs(original[-1, 0])
 
     preview._baseline.click()
     assert view.gain_mode() == 'off'
@@ -100,6 +127,12 @@ def test_settings_preview_compares_gain_on_the_same_field_samples(preferences, q
     np.testing.assert_array_equal(view._image_item.image, current)
     assert view._matrix is raw
     np.testing.assert_array_equal(raw, original)
+
+    preview.set_context('', '')
+    preview.set_result(*latest_a, newest, '')
+    qapp.processEvents()
+    assert len(requests) == 3
+    assert preview._view is None or preview._view._matrix is None
 
 
 def test_search_reveals_advanced_control_without_saving(preferences, qapp):

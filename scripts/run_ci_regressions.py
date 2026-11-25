@@ -19,6 +19,7 @@ SUITES = {
     "bscan": (
         "tests/test_bscan_aspect.py",
         "tests/test_bscan_global_preferences.py",
+        "tests/test_bscan_full_resolution.py",
         "tests/test_bscan_preference_mirror.py",
         "tests/test_bscan_qc_visibility.py",
         "tests/test_bscan_colorbar_toggle.py",

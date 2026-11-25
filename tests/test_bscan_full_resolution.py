@@ -1,4 +1,5 @@
 """No implicit sample/trace thinning anywhere in the desktop B-scan path."""
+from threading import Thread
 from types import SimpleNamespace as NS
 
 import numpy as np
@@ -59,6 +60,50 @@ def test_controller_reads_full_resolution_for_each_bscan_entry(qapp, monkeypatch
     np.testing.assert_array_equal(delivered[0].trace_indices, np.arange(4751))
     assert max((k['sample_end']-k['sample_start'])*(k['trace_end']-k['trace_start'])*4
                for k in calls) <= 8*1024*1024
+
+
+def test_settings_preview_reads_compact_raw_window_with_original_coordinates(qapp, monkeypatch):
+    rows, columns = 258, 386
+    raw = (np.arange(rows * columns, dtype=np.float32) - 50000).reshape(rows, columns)
+    samples, traces = np.arange(0, rows, 2), np.arange(0, columns, 2)
+    time_ns = 15.0 + np.arange(rows) * 0.25
+    distance_m = np.arange(columns, dtype=np.float64) ** 2 / 100
+    info = NS(shape=raw.shape, time_window_ns=64.25, length_m=distance_m[-1], dielectric_constant=9.0,
+              metadata={'time_axis_ns': time_ns, 'distance_axis_m': distance_m})
+    calls, queued, delivered, ordinary = [], [], [], []
+
+    def read_window(project, line, **options):
+        calls.append((project, line, options))
+        return raw[::2, ::2], samples, traces
+
+    controller = module.ProjectController()
+    controller._current = NS(project_id='P')
+    controller.set_backend(NS(backend=NS(projects=NS(
+        get_dataset_info=lambda project, line: info, read_window=read_window))))
+    monkeypatch.setattr(module, 'run_command', lambda command, **kw: queued.append(command))
+    controller.settings_preview_ready.connect(lambda *args: delivered.append(args))
+    controller.dataset_preview_ready.connect(ordinary.append)
+    generation = controller._preview_generation
+    controller.preview_settings_line('P', 'L09', 'settings-1')
+    command, = queued
+    worker = Thread(target=command.execute)
+    worker.start()
+    worker.join()
+    assert not delivered
+    qapp.processEvents()
+
+    assert calls == [('P', 'L09', {'max_samples': 256, 'max_traces': 384, 'normalize': False})]
+    (project_id, line_id, request_id, bundle, error), = delivered
+    assert (project_id, line_id, request_id, error) == ('P', 'L09', 'settings-1', '')
+    assert controller._preview_generation == generation and not ordinary
+    assert (bundle.sample_count, bundle.trace_count) == raw.shape
+    np.testing.assert_array_equal(bundle.sample_indices, samples)
+    np.testing.assert_array_equal(bundle.trace_indices, traces)
+    np.testing.assert_array_equal(bundle.sample_axis, time_ns[samples])
+    np.testing.assert_array_equal(bundle.trace_axis_m, distance_m[traces])
+    np.testing.assert_array_equal(bundle.matrix, raw[::2, ::2])
+    assert bundle.matrix.dtype == np.float32 and bundle.matrix.flags.c_contiguous
+    assert not bundle.matrix.flags.writeable and not np.shares_memory(bundle.matrix, raw)
 
 
 def test_imageitem_never_auto_downsamples(qapp):

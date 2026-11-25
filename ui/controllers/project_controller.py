@@ -87,6 +87,7 @@ class ProjectController(QObject):
     artifacts_updated = pyqtSignal(str, list)    # line_id, list[ProjectArtifact]
     all_artifacts_updated = pyqtSignal(list)     # 全项目 list[ProjectArtifact]（文件树成果视图）
     dataset_preview_ready = pyqtSignal(object)   # PreviewBundle (raw data)
+    settings_preview_ready = pyqtSignal(str, str, str, object, str)
     comparison_preview_ready = pyqtSignal(str, str, str, object, str)
     comparison_artifacts_ready = pyqtSignal(str, str, list)
     comparison_artifact_preview_ready = pyqtSignal(str, str, str, str, object, str)
@@ -343,6 +344,14 @@ class ProjectController(QObject):
             _PreviewLineCommand(self, project_id, line_id, self._preview_generation),
             name="mygpr-line-preview",
         )
+
+    def preview_settings_line(self, project_id: str, line_id: str, request_id: str) -> None:
+        """Read a small raw-line preview independently from the processing workspace."""
+        if project_id != self.current_project_id or self._backend() is None:
+            self.settings_preview_ready.emit(project_id, line_id, request_id, None, '当前测线不可用')
+            return
+        run_command(_SettingsPreviewCommand(self, project_id, line_id, request_id),
+                    name='mygpr-settings-preview')
 
     def preview_comparison_line(self, project_id: str, line_id: str, request_id: str) -> None:
         """Read a bounded reference without advancing the processing preview."""
@@ -910,6 +919,37 @@ class _ProjectReadCommand:
     def _publish(self, signal_name: str, *args) -> None:
         if self._context_is_current():
             self._controller._project_read_ready.emit(self, (signal_name, args))
+
+
+class _SettingsPreviewCommand(_ProjectReadCommand):
+    def __init__(self, controller, project_id, line_id, request_id):
+        super().__init__(controller)
+        self._controller = controller
+        self._project_id, self._line_id, self._request_id = project_id, line_id, request_id
+
+    def execute(self) -> None:
+        if not self._context_is_current():
+            return
+        controller = self._controller
+        context = self._project_id, self._line_id
+        try:
+            projects = controller._backend().projects
+            info = projects.get_dataset_info(*context)
+            matrix, samples, traces = projects.read_window(
+                *context, max_samples=256, max_traces=384, normalize=False)
+            matrix = np.array(matrix, dtype=np.float32, order='C', copy=True)
+            matrix.setflags(write=False)
+            bundle = controller._bundle_from_window(
+                matrix, self._line_id, sample_indices=samples, trace_indices=traces,
+                total_samples=info.shape[0], total_traces=info.shape[1],
+                length_m=info.length_m, time_window_ns=info.time_window_ns,
+                dielectric_constant=info.dielectric_constant, metadata=info.metadata,
+            )
+        except Exception as exc:  # noqa: BLE001 - Report backend failures to the owning preview.
+            _LOGGER.debug('读取设置预览失败', exc_info=True)
+            self._publish('settings_preview_ready', *context, self._request_id, None, friendly_error_message(exc))
+        else:
+            self._publish('settings_preview_ready', *context, self._request_id, bundle, '')
 
 
 class _RefreshLinesCommand(_ProjectReadCommand):
