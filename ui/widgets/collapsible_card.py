@@ -21,12 +21,11 @@ from qfluentwidgets import CardWidget, FluentIcon as FIF, ToolButton
 
 from ui import constants
 from ui import motion
-from ui.design_tokens import color
+from ui.design_tokens import color, duration
 from ui.page_scaffold import card_title
 
 __all__ = ['CollapsibleCard', 'make_collapsible_card']
 
-_DURATION_MS = 220
 # QWIDGETSIZE_MAX：QWidget 默认 maximumHeight 上限。展开后解除高度限制，
 # 交回布局决定（不设会让卡片在有 stretch 的栏里不肯长高）。
 _QWIDGETSIZE_MAX = 16777215
@@ -119,7 +118,7 @@ class CollapsibleCard(CardWidget):
 
         # 高度动画：驱动 body 的 maximumHeight（0 ↔ 自然高度）
         self._animation = QPropertyAnimation(self._body, b'maximumHeight', self)
-        self._animation.setDuration(_DURATION_MS)
+        self._animation.setDuration(duration('fold'))
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._animation.finished.connect(self._on_animation_finished)
 
@@ -198,11 +197,14 @@ class CollapsibleCard(CardWidget):
             self._body.setMaximumHeight(_QWIDGETSIZE_MAX)
         self.sig_collapsed.emit(self._collapsed)
 
-    def hideEvent(self, event) -> None:
+    def settle_motion(self) -> None:
         if self._animating:
             self._animation.stop()
             self._body.setMaximumHeight(0 if self._collapsed else self.body_height())
             self._on_animation_finished()
+
+    def hideEvent(self, event) -> None:
+        self.settle_motion()
         super().hideEvent(event)
 
 

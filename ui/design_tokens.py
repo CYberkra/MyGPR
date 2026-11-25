@@ -87,7 +87,15 @@ _STATUS_KEYS = ('success', 'warning', 'error', 'info')
 
 # ============================================================ 非颜色令牌
 RADIUS = {'none': 0, 'sm': 4, 'md': 6, 'lg': 8, 'xl': 12, 'pill': 9999}
-DURATION = {'fast': 150, 'normal': 300, 'slow': 500}      # ms
+DURATION = {
+    'drop_hint': 100,
+    'data_tab': 160,
+    'selection': 180,
+    'tool_panel': 180,
+    'progress': 200,
+    'fold': 220,
+    'fullscreen': 220,
+}
 
 
 def tokens(dark: bool) -> dict[str, str]:
@@ -133,8 +141,8 @@ def radius(name: str = 'md') -> int:
     return RADIUS[name]
 
 
-def duration(name: str = 'normal') -> int:
-    """动效时长（ms）：fast 150 / normal 300 / slow 500。"""
+def duration(name: str = 'selection') -> int:
+    """交互动效使用的毫秒数。"""
     return DURATION[name]
 
 

@@ -37,6 +37,7 @@ from ui.settings_support import read_application_version as _read_version
 from ui.settings_support import (
     SETTINGS_CATEGORIES,
     SettingTarget,
+    SettingsAppearanceMixin,
     deferred_setting_targets,
     finite_setting_value,
     match_setting_targets,
@@ -75,10 +76,11 @@ def _column(parent: QWidget) -> QVBoxLayout:
     return layout
 
 
-class SettingsPage(QWidget):
+class SettingsPage(SettingsAppearanceMixin, QWidget):
     """Display preferences without owning writes or project data."""
 
     theme_changed = pyqtSignal(str)
+    motion_preference_changed = pyqtSignal(str)
     bscan_view_changed = pyqtSignal()
     general_changed = pyqtSignal()
     project_root_requested = pyqtSignal(str)
@@ -91,6 +93,7 @@ class SettingsPage(QWidget):
         self._manager = None
         self._project_root = constants.DEFAULT_PROJECT_ROOT
         self._theme_text = constants.THEME_LIGHT
+        self._motion_preference = 'system'
         self._general = {'default_dielectric': constants.DEFAULT_DIELECTRIC,
                          'max_workers': constants.MAX_WORKERS, 'auto_prefetch_basemap': True}
         self._general_controls = {}
@@ -340,27 +343,6 @@ class SettingsPage(QWidget):
         if key in self._targets:
             keywords = self._targets[key].keywords
         self._targets[key] = SettingTarget(label, category, control, keywords, disclosure)
-
-    def _build_appearance(self, key: str) -> None:
-        layout = self._category(key)
-        self._theme_combo = SettingsChoice((
-            ('浅色', constants.THEME_LIGHT, 'settingsThemeLight'),
-            ('深色', constants.THEME_DARK, 'settingsThemeDark'),
-        ))
-        _name(self._theme_combo, 'settingsTheme', '主题')
-        self._theme_combo.setCurrentText(self._theme_text)
-        self._theme_combo.currentTextChanged.connect(self._request_theme)
-        self._row(layout, '主题', self._theme_combo)
-        reset = PushButton('恢复面板布局…')
-        reset.clicked.connect(self._confirm_layout_reset)
-        self._row(layout, '面板布局', reset, hint='恢复侧栏、任务区和全屏图窗的位置或显示状态。')
-        shortcuts = PushButton('查看快捷键')
-        shortcuts.clicked.connect(self.shortcuts_requested)
-        self._row(layout, '快捷键', shortcuts, hint='按操作或按键查找。')
-        self._target(key, '主题', self._theme_combo)
-        self._target(key, '恢复面板布局', reset)
-        self._target(key, '查看快捷键', shortcuts)
-        layout.addStretch()
 
     def _build_bscan(self, key: str) -> None:
         layout = self._category(key, '处理、解释和全屏图面共用此显示偏好。设置只影响显示。')
@@ -872,6 +854,7 @@ class SettingsPage(QWidget):
     def load_settings(self, data: dict) -> None:
         """Replay persisted preferences without notifying their writers."""
         self.restore_preferences(data, 'theme')
+        self.restore_preferences(data, 'motion')
         self.restore_preferences(data, 'general')
         self.commit_project_root(str(data.get('project_root', constants.DEFAULT_PROJECT_ROOT)))
         self.sync_bscan_view_settings(data, initial=True)
@@ -880,6 +863,11 @@ class SettingsPage(QWidget):
     def restore_preferences(self, values: dict, scope: str) -> None:
         if scope == 'theme':
             self.set_theme_text(str(values.get('theme', constants.THEME_LIGHT)))
+        elif scope == 'motion':
+            self._motion_preference = 'reduce' if values.get('motion_preference') == 'reduce' else 'system'
+            if 'appearance' in self._panels:
+                with QSignalBlocker(self._motion_choice):
+                    self._motion_choice.setCurrentText(self._motion_preference)
         elif scope == 'general':
             dielectric = finite_setting_value(values.get('default_dielectric'), constants.DEFAULT_DIELECTRIC)
             workers = int(finite_setting_value(values.get('max_workers'), constants.MAX_WORKERS))
@@ -906,6 +894,10 @@ class SettingsPage(QWidget):
     def _request_theme(self, theme: str) -> None:
         self._theme_text = theme
         self.theme_changed.emit(theme)
+
+    def _request_motion_preference(self, preference: str) -> None:
+        self._motion_preference = preference
+        self.motion_preference_changed.emit(preference)
 
     @staticmethod
     def _select_by_data(combo, value, fallback: str) -> None:
@@ -992,6 +984,7 @@ class SettingsPage(QWidget):
     def settings(self) -> dict:
         return {
             'theme': self._theme_text,
+            'motion_preference': self._motion_preference,
             **self._general,
             'project_root': self._project_root,
             **self.bscan_view_settings(),

@@ -174,6 +174,26 @@ def test_cancel_job_signal_wiring(qapp, panel):
     assert got == ['J1']
 
 
+def test_cancel_pending_preserves_filter_and_shows_only_real_progress(panel):
+    table = panel.job_table()
+    table.upsert_job('J', '处理测线')
+    table.set_status('J', 'running')
+    bar = table._bars['J']
+    table.update_progress('J', 4, 0, '读取测线')
+    assert bar.isHidden()
+    table.set_cancel_pending('J')
+    table.set_status('J', 'running')
+    table.update_progress('J', 4, 10, '写入中')
+    assert not bar.isHidden()
+    assert table.status_count('running') == 1 and table.finished_count() == 0
+    assert not table.can_cancel('J')
+    assert table.job_snapshot('J')['status_text'] == '正在取消…'
+    assert table.job_snapshot('J')['message'] == '写入中'
+    table.set_status('J', 'cancelled')
+    assert table.job_snapshot('J')['status_text'] == '已取消'
+    assert bar.isHidden() and table.finished_count() == 1
+
+
 def test_batch_keeps_successful_and_failed_lines_available_in_output_panel(panel):
     table = panel.job_table()
     opened = []

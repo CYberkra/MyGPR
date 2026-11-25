@@ -46,7 +46,7 @@ _STATUS_BY_EVENT = {
     JobEventType.FAILED: "failed",
     JobEventType.CANCELLED: "cancelled",
 }
-_TERMINAL_EVENTS = {JobEventType.COMPLETED, JobEventType.FAILED, JobEventType.CANCELLED}
+_TERMINAL_STATUSES = {'completed', 'failed', 'cancelled'}
 _POLL_INTERVAL_S = 0.2
 
 
@@ -145,12 +145,13 @@ class JobBridge(QObject):
             self._stops[job_id] = stop
         try:
             snapshot = self._backend.jobs.snapshot(job_id)
-            self.status_changed.emit(job_id, snapshot.status.value)
+            initial_status = snapshot.status.value
         except KeyError:
-            self.status_changed.emit(job_id, "queued")
+            initial_status = "queued"
+        self.status_changed.emit(job_id, initial_status)
         thread = threading.Thread(
             target=self._watch_loop,
-            args=(job_id, stop),
+            args=(job_id, stop, initial_status),
             name=f"mygpr-job-watch-{job_id[:8]}",
             daemon=True,
         )
@@ -158,12 +159,13 @@ class JobBridge(QObject):
             self._threads[job_id] = thread
         thread.start()
 
-    def cancel(self, job_id: str) -> None:
+    def cancel(self, job_id: str) -> bool:
         """Cooperatively cancel a watched job (watcher exits at terminal)."""
         try:
-            self._backend.jobs.cancel(str(job_id))
+            return self._backend.jobs.cancel(str(job_id))
         except (KeyError, RuntimeError) as exc:
             _LOGGER.warning("job cancel failed for %s: %s", job_id, exc)
+            return False
 
     def titles(self) -> dict[str, str]:
         with self._lock:
@@ -181,10 +183,8 @@ class JobBridge(QObject):
             thread.join(timeout=1.0)
 
     # ------------------------------------------------------------------
-    def _watch_loop(self, job_id: str, stop: threading.Event) -> None:
+    def _watch_loop(self, job_id: str, stop: threading.Event, last_status: str) -> None:
         sequence = 0
-        last_status = ""
-        terminal_seen = False
         warning_count = skipped_count = 0
         notice_sequence = seen_notices = 0
         try:
@@ -214,30 +214,36 @@ class JobBridge(QObject):
                             job_id, int(event.completed), int(event.total), str(event.message)
                         )
                     status = _STATUS_BY_EVENT.get(event.event_type, "")
-                    if status and status != last_status:
+                    # Historical events may precede the snapshot already sent
+                    # by watch(). A queued job progresses only to running or
+                    # a terminal state. A terminal snapshot never goes back.
+                    if (status and status not in (last_status, 'queued')
+                            and last_status not in _TERMINAL_STATUSES):
                         last_status = status
                         self.status_changed.emit(job_id, status)
-                    if event.event_type in _TERMINAL_EVENTS:
-                        terminal_seen = True
-                if terminal_seen:
+                if last_status in _TERMINAL_STATUSES:
                     break
                 stop.wait(_POLL_INTERVAL_S)
         except Exception:  # pragma: no cover - defensive: never kill a watcher silently
             _LOGGER.exception("job watcher crashed for %s", job_id)
         finally:
-            self._finalize(job_id, warning_count=warning_count, skipped_count=skipped_count)
+            self._finalize(job_id, last_status, warning_count=warning_count, skipped_count=skipped_count)
 
-    def _finalize(self, job_id: str, *, warning_count: int = 0, skipped_count: int = 0) -> None:
+    def _finalize(self, job_id: str, last_status: str, *, warning_count: int = 0, skipped_count: int = 0) -> None:
         success = False
         message = ""
         result: Any = None
         try:
             raw_snapshot = self._backend.jobs.snapshot(job_id)
         except KeyError:
-            message = "任务状态不可用"
+            success = last_status == 'completed'
+            message = {'completed': '任务完成，详情已清理', 'cancelled': '任务已取消'}.get(last_status, '任务状态不可用')
         else:
             snapshot = job_snapshot_from_raw(raw_snapshot)
             status = snapshot.status
+            if status in _TERMINAL_STATUSES and status != last_status:
+                last_status = status
+                self.status_changed.emit(job_id, status)
             success = status == "completed"
             if success:
                 message = snapshot.message or "任务完成"
@@ -258,7 +264,8 @@ class JobBridge(QObject):
             self._titles.pop(job_id, None)
             self._stops.pop(job_id, None)
             self._threads.pop(job_id, None)
-        self.job_completed.emit(job_id, success, message, result)
+        if last_status in _TERMINAL_STATUSES or not self._shutdown.is_set():
+            self.job_completed.emit(job_id, success, message, result)
 
 
 class _BackendInitWorker(QObject):

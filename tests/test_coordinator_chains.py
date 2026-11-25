@@ -46,6 +46,9 @@ class _StubView:
     def set_status(self, job_id: str, status: str) -> None:
         self.calls.append(('set_status', job_id, status))
 
+    def set_cancel_pending(self, job_id: str) -> None:
+        self.calls.append(('set_cancel_pending', job_id))
+
     def update_progress(self, job_id: str, completed: int, total: int,
                         message: str) -> None:
         self.calls.append(('update_progress', job_id, completed, total, message))
@@ -258,16 +261,85 @@ class TestJobHubFanOut:
             assert states[-1] == 'cancelled'
         assert all(notice[0] != 'error' for notice in window.infobars)
 
-    def test_cancel_marks_processing_request(self):
+    @pytest.mark.parametrize(('terminal', 'level'), [
+        ('cancelled', 'info'), ('failed', 'error'), ('completed', 'success'),
+    ])
+    def test_cancel_from_both_controls_waits_for_the_actual_terminal_state(self, terminal, level):
         bridge = _StubBridge()
-        window, _pages, _views = _make_window(bridge=bridge)
+        window, pages, (view,) = _make_window(bridge=bridge)
         coordinator = PageCoordinator(window)
-        coordinator.processing.processing_job_id = 'JOB-RUN'
+        chain, hub = coordinator.processing, coordinator.jobs
+        chain.processing_job_id = 'JOB-RUN'
+        hub.on_status('JOB-RUN', 'running')
 
-        coordinator.jobs.on_cancel('JOB-RUN')
+        chain.on_processing_cancel()
+        hub.on_cancel('JOB-RUN')
 
-        assert coordinator.processing.processing_cancel_requested is True
+        assert chain.processing_cancel_requested
         assert bridge.cancelled == ['JOB-RUN']
+        assert view.calls.count(('set_cancel_pending', 'JOB-RUN')) == 1
+        assert ('set_cancel_pending', ('JOB-RUN',)) in pages['processingInterface'].calls
+        hub.on_progress('JOB-RUN', 4, 10, '保存中')
+        assert ('update_progress', 'JOB-RUN', 4, 10, '保存中') in view.calls
+        success = terminal == 'completed'
+        hub.on_status('JOB-RUN', terminal)
+        hub.on_completed('JOB-RUN', success, '任务结果', None)
+        chain.on_run_context_finished('JOB-RUN', success, '任务结果')
+        assert [notice[0] for notice in window.infobars] == [level]
+        calls = list(view.calls)
+        hub.on_status('JOB-RUN', 'running')
+        hub.on_progress('JOB-RUN', 8, 10, '迟到')
+        hub.on_cancel('JOB-RUN')
+        assert view.calls == calls
+        assert bridge.cancelled == ['JOB-RUN']
+
+    @pytest.mark.parametrize('synchronous_terminal', [False, True])
+    def test_late_cancel_cannot_replace_a_finished_job(self, synchronous_terminal):
+        bridge = _StubBridge()
+        window, pages, (view,) = _make_window(bridge=bridge)
+        coordinator = PageCoordinator(window)
+        hub = coordinator.jobs
+        coordinator.processing.processing_job_id = 'J'
+        hub.on_status('J', 'running')
+
+        def cancel(job_id):
+            if synchronous_terminal:
+                hub.on_status(job_id, 'completed')
+            return synchronous_terminal
+
+        bridge.cancel = cancel
+        hub.on_cancel('J')
+        if not synchronous_terminal:
+            hub.on_status('J', 'completed')
+        hub.on_notice('J', {'message': '旧的写入阶段', 'level': 'info'})
+        hub.on_completed('J', True, '已保存', None)
+        assert ('set_cancel_pending', 'J') not in view.calls
+        assert ('set_cancel_pending', ('J',)) not in pages['processingInterface'].calls
+        assert view.calls[-1] == ('set_status', 'J', 'completed')
+
+    @pytest.mark.parametrize(('scope', 'title'), [('tune', 'AutoTune 自动调参'), ('velocity', '速度分析'),
+                                                  ('depth', '深度图层')])
+    @pytest.mark.parametrize('terminal', ['failed', 'cancelled'])
+    def test_scoped_failure_owns_only_its_job_notice(self, scope, title, terminal):
+        window, _, (view,) = _make_window()
+        coordinator = PageCoordinator(window)
+        hub, chain = coordinator.jobs, coordinator.processing
+        hub.register_scoped_failure('scoped')
+        hub.on_status('scoped', terminal)
+        hub.on_completed('scoped', False, '诊断详情', None)
+        if scope == 'tune':
+            chain.on_autotune_failed('dewow', '诊断详情', 'scoped')
+        elif scope == 'velocity':
+            chain.velocity_token = 'V'
+            coordinator.project.current_line_id = 'L01'
+            chain.on_velocity_failed('V', 'P-001', 'L01', '诊断详情', 'scoped')
+        else:
+            chain.on_depth_save_failed('诊断详情', 'scoped')
+        hub.on_completed('scoped', False, '重复终态通知', None)
+        assert [notice[1] for notice in window.infobars] == ([title] if terminal == 'failed' else [])
+        assert ('update_progress', 'scoped', 0, 0, '诊断详情') in view.calls
+        hub.on_completed('another', False, '诊断详情', None)
+        assert window.infobars[-1][1] == '任务失败'
 
     def test_views_filter_none_widgets(self):
         window, _pages, _views = _make_window(with_views=False)

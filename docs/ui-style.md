@@ -1,8 +1,7 @@
 # MyGPR UI 样式规范（Design Tokens v2）
 
-> 来源：2026-09-21 UI 设计评审（像素君）§3 固化。单源原则：**token 只定义在
-> `ui/constants.py`（值）与 `ui/theme_helpers.py`（随主题取值/QSS 工厂）**，
-> 页面代码零字面量。新页面 / 改版 PR 按文末 checklist 自查。
+> 基础字号、间距和状态色定义在 `ui/constants.py`。组件语义色、圆角和动效时长定义在
+> `ui/design_tokens.py`。Qt 字体与 QSS 工厂由 `ui/theme_helpers.py` 提供。
 
 ## 1. 字号（五档 pt，1pt = 4/3 px @96dpi）
 
@@ -66,7 +65,7 @@ B-Scan 工具条的「+/-」已由文字钮改图标钮（`FIF.ZOOM_IN/OUT`）�
 | `success/warning/error/info` | Tailwind 语义 | 同色相高亮变体 | 状态文字 |
 | `secondary` | `#6b7280`（AA 4.84:1） | `#a8b0bd` | **hint 专用**；hint 一律 `make_hint()` / `hint_qss()` |
 | `disabled` | `#9ca3af` 恒值 | 同 | **仅真禁用控件**，不得当 hint |
-| `ACCENT` | `#009688` | `#2dd4bf` | 选中态文字/线条/链接（`accent_color()`）；实色块用 `ACCENT_SOLID` |
+| `ACCENT` | `#2563eb` | `#60a5fa` | 主操作、选中态、键盘焦点与链接。实色块使用 `ACCENT_SOLID` |
 
 ## 5. 组件范式
 
@@ -101,8 +100,7 @@ B-Scan 工具条的「+/-」已由文字钮改图标钮（`FIF.ZOOM_IN/OUT`）�
   回归防护见 `tests/test_bscan_aspect.py`。
 - **hint**：`make_hint(text, parent=, key='secondary')`；运行期改色用
   `HintLabel.set_hint_key(key)`，勿手工 setStyleSheet。
-- **徽章**：`make_badge(text, key)`；QSS 模板单源 `BADGE_QSS`（单占位，
-  供 `motion.animate_badge_color` 正则回填）与 `BADGE_QSS_PAIR`（双占位）。
+- **任务徽章**：随状态立即更新文字和配色。浅深主题均使用成对前景与底色，普通文字对比度至少 4.5∶1。
 - **图内标题**：卡头即标题，pyqtgraph 图内不留 title；数据身份标题
   （如测线名）经 `BScanView._export_title` 机制保留并复用给导出。
 - **顶栏**：药丸页签居中，右端固定为 文件树 / 输出面板 双开关
@@ -136,6 +134,7 @@ B-Scan 工具条的「+/-」已由文字钮改图标钮（`FIF.ZOOM_IN/OUT`）�
 - [ ] 画布/表格空态有 `EmptyStateOverlay`，文案含前置条件说明
 - [ ] pyqtgraph 视图网格走 `style_plot_item(grid=)`，无写死 alpha
 - [ ] 随主题变色的控件实现 `apply_theme(dark)`，颜色查表不自持
-- [ ] 回归：`pytest tests/ -q` 全绿 +
-      `QT_QPA_PLATFORM=offscreen python app_qt.py --smoke` 9 图无布局位移
-      （offscreen CJK 渲染为方块属已知限制，只看布局/配色/间距）
+- [ ] 动效走 `ui.motion`，选中、命中与任务状态在事件到达时更新。启用减少动态效果时，局部过渡立即落位。
+- [ ] 依据[测试策略](developer/TESTING_STRATEGY.md)核对对应提交的 GitHub Actions，用 Windows 实窗检查 DPI、键盘和画布响应。
+
+详见[工作台视觉与动效方案](superpowers/specs/2026-11-25-workbench-motion-design.md)。

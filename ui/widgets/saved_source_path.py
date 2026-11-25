@@ -4,8 +4,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 from qfluentwidgets import CaptionLabel, TransparentPushButton, isDarkTheme
 
 from ui.design_tokens import tokens
-from ui.widgets.context_menus import add_action, make_menu
-from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.context_menus import add_action, make_menu, show_menu
 
 
 class _PathButton(TransparentPushButton):
@@ -112,7 +111,5 @@ class SavedSourcePath(QWidget):
             key, title, _revision = entry[:3]
             add_action(menu, None, str(title),
                        lambda _checked=False, key=key: self._open(key, generation), enabled=bool(key))
-        menu._keyboard = FluentMenuKeyboard(menu)
         menu.closedSignal.connect(lambda: setattr(self, '_menu', None))
-        menu.exec(self.mapToGlobal(self.rect().bottomLeft()))
-        menu._keyboard.focus_menu(menu)
+        show_menu(menu, self.mapToGlobal(self.rect().bottomLeft()))

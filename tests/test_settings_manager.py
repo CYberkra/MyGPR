@@ -108,6 +108,7 @@ def test_corrupt_settings_require_backup_before_saving(tmp_path, monkeypatch):
     ('auto_prefetch_basemap', 0, False),
     ('bscan_colorbar_visible', 'no', False),
     ('processing_left_collapsed', '1', True),
+    ('motion_preference', 'always-animate', 'system'),
 ])
 def test_invalid_known_settings_recover_individually(tmp_path, key, bad, expected):
     target = tmp_path / 'settings.json'

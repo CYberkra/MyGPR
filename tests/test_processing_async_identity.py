@@ -192,6 +192,43 @@ def test_autotune_submission_preserves_source_header_and_trace_metadata(qapp, ar
     assert np.array_equal(submissions[0]['trace_metadata']['trace_axis_m'], dataset.trace_metadata['trace_axis_m'])
 
 
+@pytest.mark.parametrize('analysis', ['autotune', 'velocity'])
+def test_scoped_worker_registers_error_owner_before_an_immediate_failure(qapp, analysis):
+    from threading import Thread
+
+    from PyQt6.QtCore import QThread
+    from ui.controllers.processing_controller import _AutotuneSubmitCommand, _VelocitySubmitCommand
+
+    events = []
+    class ImmediateFailure(Bridge):
+        def watch(self, job_id, *, title):
+            events.append(('watch', job_id, QThread.currentThread() == qapp.thread()))
+            self.job_completed.emit(job_id, False, '读取失败', None)
+
+    job_id = f'{analysis}-id'
+    backend = SimpleNamespace(
+        projects=SimpleNamespace(read_dataset=lambda *_: SimpleNamespace(data=[[0.]],
+            header_info={}, trace_metadata={})),
+        submit_autotune=lambda *_args, **_kwargs: job_id,
+        submit_velocity_analysis=lambda *_args, **_kwargs: job_id)
+    controller = ProcessingController()
+    controller.set_backend(SimpleNamespace(backend=backend, job_bridge=ImmediateFailure()))
+    controller.scoped_job_submitted.connect(lambda jid: events.append(('register', jid)))
+    getattr(controller, f'{analysis}_context_failed').connect(lambda *args: events.append(('failed', args[-1])))
+    legacy = []
+    getattr(controller, f'{analysis}_failed').connect(lambda *args: legacy.append(args))
+    command = (_AutotuneSubmitCommand(controller, 'P', 'L01', 'dewow', {}, '')
+               if analysis == 'autotune' else
+               _VelocitySubmitCommand(controller, 'sel', 'P', 'L01', [(1, 1), (2, 3), (4, 1)]))
+    thread = Thread(target=command.execute)
+    thread.start()
+    thread.join(3)
+    assert not thread.is_alive()
+    qapp.processEvents()
+    assert events == [('register', job_id), ('watch', job_id, True), ('failed', job_id)]
+    assert legacy == ([('dewow', '读取失败')] if analysis == 'autotune' else [('sel', 'P', 'L01', '读取失败')])
+
+
 def test_pipeline_defaults_to_final_only_block_friendly_execution(qapp):
     bridge = Bridge()
     submissions = []

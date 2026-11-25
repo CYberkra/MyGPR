@@ -3,22 +3,17 @@
 > 依据 design-ui-designer 方法论：没有状态矩阵的组件是半成品。
 > 色值一律引用 `ui/design_tokens.py` 语义令牌，本文档只记口径不记色号。
 
-通用基准：focus-visible = 2px 实线 `border_focus` + 2px 偏移；disabled =
-不透明度 0.6 且**真不可点**（非仅变灰）；过渡时长 fast 150ms / normal 300ms。
+键盘焦点使用 `border_focus` 轮廓。禁用状态移除交互能力。时长由
+`ui/design_tokens.py` 按用途定义。设置中的“减少动态效果”使正在进行的过渡直接落位。
 
-## 1. 结果卡（`_ResultCard`，结果网格）
+## 1. B-scan 数据标签与拖放
 
 | 状态 | 实现 | 来源 |
 |---|---|---|
-| default | 2px 透明描边（占位防跳动） | 本轮令牌化 |
-| hover | 淡 primary 描边 0.35 + 微底 0.03（QSS `:hover`） | ✅ 本轮新增 |
-| active/pressed | 点击即选中（sig_clicked），无独立按压态 | 设计取舍：点选语义由选中态承担 |
-| selected | 仅 primary 0.85 描边，**背景保持原样**（真机反馈：淡底会让 B-Scan 周边泛色，干扰剖面判读） | 已有（2026-09-28 去底） |
-| focus-visible | 2px border_focus 描边（QSS `:focus`）+ Tab 可达 + Enter/Space 选中 | ✅ 已实现 |
-| disabled | N/A（结果卡无禁用语义） | — |
-| loading | 骨架屏 `_Skeleton` + 交叉淡入 `_reveal`（预留尺寸防跳动） | 已有 |
-| error | 预览失败由宿主 InfoBar 反馈；卡片保持骨架 | 已有 |
-| empty | 网格空态浮层（「选择测线后显示…」） | 已有 |
+| selected | 剖面随来源直接切换，2 px 下划线从屏幕位置续接，160 ms 到达目标。恢复布局时直接对齐 | `BScanWorkspace` |
+| focus-visible | 使用独立焦点样式，键盘可选中相邻来源与打开菜单 | `_SourceTabBar` |
+| drop target | 文字与边框立即可见，底色首次淡入 100 ms。Esc、松手、关闭目标组立即清场 | `_DropHint` |
+| loading / error / empty | 画布内给出当前来源的请求、失败原因和重试，或打开数据的入口 | `_PreviewStatus` |
 
 ## 2. 处理链 chip（`_Chip`）
 
@@ -46,8 +41,9 @@
 | 状态 | 实现 |
 |---|---|
 | default / hover / pressed / disabled | qfw PrimaryPushButton 内置 |
-| loading | 运行中 `运行中·` 旋转点动画 + 取消按钮点亮 |
-| error | 运行失败经任务中心状态徽章（error 色 + 文案，非仅颜色） |
+| loading | “运行中…”与“取消任务”显示在处理工具栏。已知总量的进度在 200 ms 内续接，未知总量显示阶段文字 |
+| cancelling | 提交取消后，原位置和任务行显示“正在取消…”。作业事件确认后更新终态 |
+| error | 失败使用可读徽章与任务详情。每项作业的失败提示由一个入口负责 |
 | focus-visible | qfw 焦点样式（系统焦点环） |
 
 ## Backlog（后续做）

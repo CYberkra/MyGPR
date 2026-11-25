@@ -82,16 +82,38 @@ class TestDepthRowVisibility:
 
 
 class TestView3dCardCollapse:
+    def test_switch_motion_updates_the_indicator_without_repeating_the_command(self, spatial, monkeypatch):
+        from PyQt6.QtCore import QAbstractAnimation
+        from ui import motion
+
+        switch = spatial._3d_drape_switch
+        requested = not switch.isChecked()
+        signals = []
+        switch.checkedChanged.connect(signals.append)
+        monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
+        switch.setChecked(requested)
+        animation = switch.indicator.slideAni
+        assert animation.state() == QAbstractAnimation.State.Running
+        monkeypatch.setattr(motion, 'animations_enabled', lambda: False)
+        switch.settle_motion()
+        assert switch.indicator.sliderX == animation.endValue()
+        switch.setChecked(not requested)
+        assert animation.state() == QAbstractAnimation.State.Stopped
+        assert switch.indicator.sliderX == animation.endValue()
+        assert signals == [requested, not requested]
+
     def test_default_collapsed(self, spatial):
         """默认收起——这正是省下 28.8% 左栏高度的关键。"""
         assert spatial._view3d_card.is_collapsed()
 
-    def test_auto_expands_on_3d_segment(self, spatial, qapp):
+    def test_auto_expands_on_3d_segment(self, spatial, monkeypatch):
         """切到三维视图 → 自动展开（否则用户得先意识到"要展开才能调"）。"""
+        from ui import motion
+        monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
         assert spatial._view3d_card.is_collapsed()
         spatial._switch_view(_SEG_3D)
-        settle(qapp, 0.3)
         assert not spatial._view3d_card.is_collapsed()
+        assert not spatial._view3d_card._animating
 
     def test_not_auto_collapsed_when_leaving_3d(self, spatial, qapp):
         """切走**不**自动收起：手动展开查看是主动行为。"""

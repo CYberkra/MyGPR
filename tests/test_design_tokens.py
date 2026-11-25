@@ -59,8 +59,9 @@ class TestTokenShape:
 
     def test_scales_are_on_system(self):
         assert RADIUS['md'] == 6 and RADIUS['pill'] > 100
-        assert DURATION['fast'] == 150 and DURATION['slow'] == 500
-        assert radius('md') == 6 and duration('normal') == 300
+        assert DURATION == {'drop_hint': 100, 'data_tab': 160, 'selection': 180,
+                            'tool_panel': 180, 'progress': 200, 'fold': 220, 'fullscreen': 220}
+        assert radius('md') == 6 and duration('selection') == 180
 
 
 class TestContrastMeasured:
@@ -94,7 +95,7 @@ class TestHelpers:
 
     def test_radius_and_duration_defaults(self):
         assert radius() == 6
-        assert duration() == 300
+        assert duration() == duration('selection')
 
 
 class TestControlPaletteForwarding:

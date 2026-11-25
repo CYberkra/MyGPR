@@ -62,8 +62,10 @@ def drop(page, line='L02', edge='right', group_id=None):
     mime = manager.mime_for_line(line)
     entered = QDragEnterEvent(point, Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(target, entered)
+    assert group.hint.isVisible() and manager.label(line) in group.hint.text()
     event = QDropEvent(QPointF(point), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(target, event)
+    assert not page._workspace.drop_hint_visible()
     return event.isAccepted()
 
 

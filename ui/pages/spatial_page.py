@@ -28,10 +28,11 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (CaptionLabel, ComboBox, DoubleSpinBox,
                             PrimaryPushButton, PushButton,
-                            Slider, SwitchButton)
+                            Slider)
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
+from ui.fluent_motion import MotionSwitchButton
 from ui.geo_utils import coverage_statistics, format_distance, format_spacing
 from ui.qt_defer import defer_call
 from ui.spatial_view_sync import ViewSyncMixin
@@ -252,7 +253,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         drape_label.setMinimumWidth(60)
         drape_label.setToolTip('开：测线高程从地形采样（抑制 RTK 高程噪声）；关：原始 GPS 高程')
         drape_row.addWidget(drape_label)
-        self._3d_drape_switch = SwitchButton(view3d_card)
+        self._3d_drape_switch = MotionSwitchButton(view3d_card)
         drape_row.addWidget(self._3d_drape_switch, 1)
         view3d_layout.addLayout(drape_row)
         imagery_row = QHBoxLayout()
@@ -261,7 +262,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         imagery_label.setMinimumWidth(60)
         imagery_label.setToolTip('开：地形表面贴卫星影像；关：高程色表')
         imagery_row.addWidget(imagery_label)
-        self._3d_imagery_switch = SwitchButton(view3d_card)
+        self._3d_imagery_switch = MotionSwitchButton(view3d_card)
         self._3d_imagery_switch.setChecked(True)
         imagery_row.addWidget(self._3d_imagery_switch, 1)
         view3d_layout.addLayout(imagery_row)
@@ -657,7 +658,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         is_depth = route_key == _SEG_DEPTH
         self._depth_row_widget.setVisible(is_depth)
         if route_key == _SEG_3D and self._view3d_card.is_collapsed():
-            self._view3d_card.set_collapsed(False, animate=True)
+            self._view3d_card.set_collapsed(False, animate=False)
 
     def _refresh_views(self) -> None:
         """勾选集合变化 → 重绘视图。

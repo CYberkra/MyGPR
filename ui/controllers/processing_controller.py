@@ -89,14 +89,19 @@ class ProcessingController(QObject):
     estimate_finished = pyqtSignal(str, object)  # request token, ResourceEstimate
     estimate_failed = pyqtSignal(str, str)
     autotune_finished = pyqtSignal(str, dict)   # method_id, {best_params, ...}
-    autotune_failed = pyqtSignal(str, str)
+    autotune_failed = pyqtSignal(str, str)  # method_id, message
+    autotune_context_failed = pyqtSignal(str, str, str)  # method_id, message, job_id
+    _scoped_watch_requested = pyqtSignal(str, str, object)
+    scoped_job_submitted = pyqtSignal(str)
     velocity_submitted = pyqtSignal(str, str)   # job_id, token
     velocity_finished = pyqtSignal(str, str, str, dict)  # token, project_id, line_id, {evidence, ...}
-    velocity_failed = pyqtSignal(str, str, str, str)     # token, project_id, line_id, message
+    velocity_failed = pyqtSignal(str, str, str, str)  # token, project_id, line_id, message
+    velocity_context_failed = pyqtSignal(str, str, str, str, str)  # plus job_id
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._backend_controller = None
+        self._scoped_watch_requested.connect(self._watch_scoped_job)
         self._gain_preview_requests = {}
         requests = self._gain_preview_requests
         self.destroyed.connect(lambda *_: _cancel_gain_inputs(requests))
@@ -133,6 +138,21 @@ class ProcessingController(QObject):
         source = self._gain_preview_requests.pop(token, None)
         if source is not None:
             source.cancel()
+
+    def _watch_scoped_job(self, job_id, title, callback):
+        # A worker submits the operation. Install its completion callback in the
+        # controller's Qt thread, where it has an event loop, before watch().
+        self.scoped_job_submitted.emit(job_id)
+        self._watch_with_callback(job_id, title, callback)
+
+    def _fail_autotune(self, method_id: str, message: str, job_id: str = '') -> None:
+        self.autotune_context_failed.emit(method_id, message, job_id)
+        self.autotune_failed.emit(method_id, message)
+
+    def _fail_velocity(self, token: str, project_id: str, line_id: str,
+                       message: str, job_id: str = '') -> None:
+        self.velocity_context_failed.emit(token, project_id, line_id, message, job_id)
+        self.velocity_failed.emit(token, project_id, line_id, message)
 
     def _watch_with_callback(
         self,
@@ -375,6 +395,7 @@ class _AutotuneSubmitCommand:
         backend = c._backend()
         bridge = c._job_bridge()
         if backend is None or bridge is None:
+            c._fail_autotune(self._method_id, "后端尚未就绪")
             return
         try:
             if self._input_artifact_id:
@@ -397,7 +418,7 @@ class _AutotuneSubmitCommand:
         except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             c.log_message.emit(f"自动调参提交失败：{message}")
-            c.autotune_failed.emit(self._method_id, message)
+            c._fail_autotune(self._method_id, message)
             return
         c.log_message.emit(f"自动调参已提交：{self._method_id}")
 
@@ -408,10 +429,9 @@ class _AutotuneSubmitCommand:
                 )
                 c.log_message.emit(f"自动调参完成：{self._method_id}")
             else:
-                c.autotune_failed.emit(self._method_id, message)
-                c.log_message.emit(f"自动调参失败：{message}")
+                c._fail_autotune(self._method_id, message, job_id)
 
-        c._watch_with_callback(job_id, f"自动调参 {self._method_id}", _done)
+        c._scoped_watch_requested.emit(job_id, f"自动调参 {self._method_id}", _done)
 
 
 class _VelocitySubmitCommand:
@@ -438,11 +458,10 @@ class _VelocitySubmitCommand:
         backend = c._backend()
         bridge = c._job_bridge()
         if backend is None or bridge is None:
-            c.velocity_failed.emit(
-                self._token, self._project_id, self._line_id, "后端尚未就绪")
+            c._fail_velocity(self._token, self._project_id, self._line_id, "后端尚未就绪")
             return
         if len(self._picks) < 3:
-            c.velocity_failed.emit(
+            c._fail_velocity(
                 self._token, self._project_id, self._line_id,
                 "双曲线拟合至少需要 3 个拾取点")
             return
@@ -455,8 +474,7 @@ class _VelocitySubmitCommand:
         except EXPECTED_BACKEND_ERRORS as exc:
             message = friendly_error_message(exc)
             c.log_message.emit(f"速度分析提交失败：{message}")
-            c.velocity_failed.emit(
-                self._token, self._project_id, self._line_id, message)
+            c._fail_velocity(self._token, self._project_id, self._line_id, message)
             return
         c.log_message.emit(f"速度分析已提交：{self._line_id}")
         c.velocity_submitted.emit(job_id, self._token)
@@ -469,11 +487,9 @@ class _VelocitySubmitCommand:
                 )
                 c.log_message.emit(f"速度分析完成：{self._line_id}")
             else:
-                c.velocity_failed.emit(
-                    self._token, self._project_id, self._line_id, message)
-                c.log_message.emit(f"速度分析失败：{message}")
+                c._fail_velocity(self._token, self._project_id, self._line_id, message, job_id)
 
-        c._watch_with_callback(job_id, f"速度分析 {self._line_id}", _done)
+        c._scoped_watch_requested.emit(job_id, f"速度分析 {self._line_id}", _done)
 
 
 __all__ = ["ProcessingController", "build_method_dicts"]

@@ -25,7 +25,6 @@ SPLASH_DURATION_MS = 600
 # 右侧全局折叠面板（style_spec §2.5）
 PANEL_MAX_WIDTH = 380
 PANEL_MIN_HEIGHT = 400
-PANEL_ANIM_DURATION_MS = 220
 FOLD_BUTTON_WIDTH = 18
 FOLD_BUTTON_HEIGHT = 60
 
@@ -114,7 +113,7 @@ STATUS_COLORS = {
     'disabled': ('#9ca3af', '#9ca3af'),
 }
 
-# 强调色（选中态/主操作/链接）。浅色沿用品牌 teal；深色取高亮度变体供
+# 蓝色强调色（选中态/主操作/链接）。深色取高亮度变体供
 # 文字/线条使用。ACCENT_SOLID 为双主题同值的实色块用法（表格选中底等），
 # 与 qfluentwidgets 默认主题色对表。
 ACCENT = ('#2563eb', '#60a5fa')
@@ -129,13 +128,12 @@ COLOR_DISABLED = STATUS_COLORS['disabled'][0]
 # 徽章配色对（文字色, 底色）：浅色 = 彩字淡底（style_spec §1.2 逐字值）；
 # 深色 = 白字彩底（参照任务中心徽章的双主题安全做法，淡底在深底上刺眼）。
 BADGE_COLOR_SETS = {
-    # 浅色彩字与 STATUS_COLORS 浅色档同步提深（WCAG AA，见上注释）；
-    # 彩字对其淡底实测 ≥ 4.4:1。
+    # 徽章前景按实际底色选取，深浅主题的任务状态文字均达到 4.5:1。
     'success': (('#15803d', '#f0fdf4'), ('#ffffff', '#15803d')),
     'warning': (('#b45309', '#fffbeb'), ('#ffffff', '#b45309')),
-    'info': (('#2563eb', '#eff6ff'), ('#ffffff', '#1d4ed8')),
-    'error': (('#dc2626', '#fef2f2'), ('#ffffff', '#b91c1c')),
-    'neutral': (('#9ca3af', '#f3f4f6'), ('#e5e7eb', '#4b5563')),
+    'info': (('#1d4ed8', '#eff6ff'), ('#ffffff', '#1d4ed8')),
+    'error': (('#b91c1c', '#fef2f2'), ('#ffffff', '#b91c1c')),
+    'neutral': (('#4b5563', '#f3f4f6'), ('#e5e7eb', '#4b5563')),
 }
 
 # RTK 定位状态 → 徽章语义键

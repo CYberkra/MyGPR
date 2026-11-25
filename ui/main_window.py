@@ -21,12 +21,12 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
+    FluentIcon as FIF, FluentWindow, InfoBarPosition,
     LineEdit, NavigationItemPosition, PrimaryPushButton, PushButton,
     SplashScreen, TransparentToolButton, isDarkTheme,
 )
 
-from ui import constants, file_dialogs
+from ui import constants, file_dialogs, motion
 from ui.icons import WorkbenchIcon
 from ui.main_window_bscan_prefs import BScanPreferenceMixin
 from ui.page_coordinator import PageCoordinator
@@ -34,7 +34,9 @@ from ui.qt_defer import defer_call
 from ui.logger_config import setup_logger
 from ui.settings_manager import SettingsManager
 from ui.theme_helpers import apply_theme, control_palette
+from ui.widgets.context_menus import show_menu
 from ui.widgets.file_tree_panel import FileTreePanel
+from ui.widgets.info_bar import InfoBar
 from ui.widgets.segment_tabs import SlimSegment
 
 logger = setup_logger('mygpr_window', 'logs/mygpr_window.log', level=logging.DEBUG)
@@ -127,6 +129,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
     def __init__(self, settings: SettingsManager = None, parent=None):
         super().__init__(parent)
         self.settings = settings or SettingsManager()
+        motion.set_reduced_motion(self.settings.get('motion_preference') == 'reduce')
         self.spacing = constants.PAGE_SPACING
         self._restoring_settings = False
         self.pages = {}             # objectName -> page widget
@@ -154,12 +157,25 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # 首屏后空闲分片构造剩余页面（启动提速：把 6 个非首屏页的构造挪出首帧）
         self._start_warmup()
 
+    def nativeEvent(self, event_type, message):
+        if motion.is_system_setting_change(event_type, message):
+            defer_call(self, self._settle_disabled_motion)
+        return super().nativeEvent(event_type, message)
+
+    def _settle_disabled_motion(self) -> None:
+        if not motion.animations_enabled():
+            motion.settle_window_motion(self)
+
+    def _on_motion_preference_changed(self, preference: str) -> None:
+        if self._save_settings_page_preferences('motion', {'motion_preference': preference}):
+            motion.set_reduced_motion(self.settings.get('motion_preference') == 'reduce')
+            self._settle_disabled_motion()
+
     def _import_dropped_file(self, source: str) -> None:
         project = self._page('projectInterface')
         if self._backend_ready and project.import_dropped_file(source):
             self.switchTo(project)
         else:
-            from qfluentwidgets import InfoBar
             InfoBar.warning(title='拖入导入', content='请先打开可写项目，并等待当前任务或后端初始化完成。', parent=self)
 
     def _inject_page_settings(self, changed: set[str] | None = None) -> None:
@@ -583,7 +599,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         self._project_menu = project.startup.project_menu(
             self._project_switch_btn, can_close=project.workspace_state() != 'startup',
             close_requested=project.close_project_requested.emit)
-        self._project_menu.exec(self._project_switch_btn.mapToGlobal(
+        show_menu(self._project_menu, self._project_switch_btn.mapToGlobal(
             self._project_switch_btn.rect().bottomLeft()))
 
     def _update_workspace_navigation(self, _state=None) -> None:
@@ -775,6 +791,8 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # ---------------- 设置页（SPEC §6.4）
         if hasattr(settings_page, 'theme_changed'):
             settings_page.theme_changed.connect(self._on_theme_changed)
+        if hasattr(settings_page, 'motion_preference_changed'):
+            settings_page.motion_preference_changed.connect(self._on_motion_preference_changed)
         if hasattr(settings_page, 'bscan_view_changed'):
             settings_page.bscan_view_changed.connect(
                 self._on_settings_bscan_changed)

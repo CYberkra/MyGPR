@@ -18,13 +18,14 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, CardWidget, InfoBar,
+    BodyLabel, CardWidget,
     InfoBarPosition, LineEdit, PrimaryPushButton, PushButton,
     ToolButton, TransparentToolButton, isDarkTheme,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.widgets.info_bar import InfoBar
 from ui.icons import RESULT_DELETE
 from ui.page_scaffold import make_card, make_form_row, make_hint
 from ui.pages.project_visuals import (

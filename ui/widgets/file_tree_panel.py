@@ -34,9 +34,8 @@ from ui.file_tree import (
     build_files_model, build_project_model,
 )
 from ui.theme_helpers import control_palette, hint_qss, status_color
-from ui.widgets.context_menus import add_action, make_menu
+from ui.widgets.context_menus import add_action, make_menu, show_menu
 from ui.widgets.dock_panel import DockPanel
-from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 
 _ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；artifact → artifact_id；spatial → result_id；report → package_dir
 _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
@@ -736,9 +735,7 @@ class FileTreePanel(DockPanel):
         identity = id(menu)
         menu.closedSignal.connect(lambda: self._forget_context_menu(identity))
         menu.destroyed.connect(lambda _obj=None: self._forget_context_menu(identity))
-        menu._tree_keyboard = FluentMenuKeyboard(menu)
-        menu.exec(self._tree.viewport().mapToGlobal(position))
-        menu._tree_keyboard.focus_menu(menu)
+        show_menu(menu, self._tree.viewport().mapToGlobal(position))
 
     def eventFilter(self, watched, event):
         if watched is self and event.type() == QEvent.Type.Hide:

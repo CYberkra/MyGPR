@@ -12,18 +12,18 @@ import json
 from uuid import uuid4
 
 from PyQt6.QtCore import (
-    QEasingCurve, QEvent, QMimeData, QPoint, QPropertyAnimation, QRect, QRectF, Qt, pyqtSignal,
+    QEvent, QMimeData, QPoint, QRect, QRectF, Qt, QTimer, pyqtSignal,
 )
 from PyQt6.QtGui import QDrag, QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QSplitter, QTabBar, QVBoxLayout, QWidget,
+    QApplication, QHBoxLayout, QSplitter, QTabBar, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     FluentIcon as FIF, RoundMenu, Theme, ToolButton,
     TransparentPushButton, TransparentToolButton, isDarkTheme,
 )
 
-from ui import constants, motion
+from ui import constants
 from ui.design_tokens import color, rgba
 from ui.widgets.bscan_view import BScanView
 from ui.widgets.bscan_preview_status import _PreviewStatus
@@ -31,7 +31,7 @@ from ui.widgets.context_menus import make_menu, show_menu
 from ui.widgets.object_context_menu import object_action
 from ui.widgets.bscan_link import compatible
 from ui.widgets.bscan_workspace_link import BScanWorkspaceLink
-from ui.widgets.bscan_source_tabs import _SourceTabBar
+from ui.widgets.bscan_source_tabs import _DropHint, _SourceTabBar
 
 
 _MIME = 'application/x-mygpr-bscan-tab'
@@ -93,18 +93,7 @@ class _ViewGroup(QWidget):
         layout.addLayout(header)
         layout.addWidget(self.view, 1)
         self.status = _PreviewStatus(self)
-        self.hint = QLabel(self)
-        self.hint.setObjectName('bscanDropHint')
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.hint_effect = QGraphicsOpacityEffect(self.hint)
-        self.hint_effect.setOpacity(0.0)
-        self.hint.setGraphicsEffect(self.hint_effect)
-        self.hint_animation = QPropertyAnimation(self.hint_effect, b'opacity', self)
-        self.hint_animation.setDuration(100)
-        self.hint_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.hint_animation.finished.connect(self._finish_hint_fade)
-        self.set_hint_visible(False)
+        self.hint = _DropHint(self)
         self.setFocusProxy(self.tabs)
         self.tabs.currentChanged.connect(lambda _index: workspace._current_changed(self))
         self.tabs.tabBarClicked.connect(lambda index: workspace._tab_clicked(self, index))
@@ -121,24 +110,6 @@ class _ViewGroup(QWidget):
         compact = event.size().width() < 280
         self.display_settings.setVisible(not compact)
         self.fit_view.setVisible(not compact)
-
-    def set_hint_visible(self, visible):
-        self.hint_animation.stop()
-        target = 1.0 if visible else 0.0
-        if not motion.animations_enabled():
-            self.hint_effect.setOpacity(target)
-            self.hint.setVisible(visible)
-            return
-        if visible:
-            self.hint.show()
-            self.hint.raise_()
-        self.hint_animation.setStartValue(self.hint_effect.opacity())
-        self.hint_animation.setEndValue(target)
-        self.hint_animation.start()
-
-    def _finish_hint_fade(self):
-        if self.hint_effect.opacity() <= 0.0:
-            self.hint.hide()
 
     def keys(self):
         return [str(self.tabs.tabData(i)) for i in range(self.tabs.count())]
@@ -177,6 +148,10 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         self._pending: set[str] = set()
         self._closed: list[dict] = []
         self._active_group = ''
+        self._hint_group = None
+        self._hint_leave_timer = QTimer(self)
+        self._hint_leave_timer.setSingleShot(True)
+        self._hint_leave_timer.timeout.connect(self._clear_hint)
         self._last_active = ('', '')
         self._dark = isDarkTheme()
         self._menu = None
@@ -210,14 +185,14 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         self._sync()
 
     @contextmanager
-    def _change(self):
+    def _change(self, *, animate_group=None):
         self._mutating += 1
         try:
             yield
         finally:
             self._mutating -= 1
             if not self._mutating:
-                self._sync()
+                self._sync(animate_group=animate_group)
 
     def _new_group(self, group_id=None):
         self._counter += 1
@@ -297,9 +272,9 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             return False
         if key != group.current_key():
             self._settle_group_fullscreen(group)
-        with self._change():
+        index = group.index_of(key)
+        with self._change(animate_group=group if index >= 0 and key != group.current_key() else None):
             group.capture()
-            index = group.index_of(key)
             if index < 0:
                 index = group.tabs.addTab(str(self._sources[key].get('title') or key))
                 group.tabs.setTabData(index, key)
@@ -312,7 +287,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             self._settle_group_fullscreen(group)
             group.capture()
             self._active_group = group.group_id
-            self._sync()
+            self._sync(animate_group=group)
 
     def _activate_group(self, group):
         if group.group_id in self._groups and not self._mutating:
@@ -325,7 +300,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             self._activate_group(group)
             self.source_activated_by_user.emit(group.current_key())
 
-    def _sync(self):
+    def _sync(self, *, animate_group=None):
         if self._active_group not in self._groups:
             self._active_group = self.group_ids()[0]
         for group in self._groups.values():
@@ -336,9 +311,12 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
                 group.tabs.setTabToolTip(index, str(source.get('tooltip') or f'{title}\n{key}'))
                 group.tabs.setTabIcon(index, FIF.PIN.icon() if key in group.pinned else QIcon())
                 group.tabs.sync_close_button(index, key, title)
-            group.tabs.sync_indicator(animate=False)
-            self._render(group)
         self.apply_theme(self._dark, refresh_views=False)
+        for group in self._groups.values():
+            group.tabs.sync_indicator(animate=group is animate_group)
+        # A cached preview can synchronously refill the catalog from _render.
+        for group in self._groups.values():
+            self._render(group)
         active = (self._active_group, self.active_key())
         if active != self._last_active:
             self._last_active = active
@@ -392,6 +370,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
         group = self._group(group_id)
         if group is None or key not in group.keys() or (key in group.pinned and not force):
             return False
+        self._clear_hint()
         if key == group.current_key():
             self._settle_group_fullscreen(group)
         with self._change():
@@ -540,6 +519,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
     def _remove_empty(self, group):
         if group.tabs.count() or len(self._groups) == 1:
             return
+        if self._hint_group is group:
+            self._clear_hint()
         self._settle_group_fullscreen(group)
         parent = group.parentWidget()
         group.view.clear()
@@ -615,6 +596,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
 
         if not isinstance(state, dict) or state.get('version') != 1 or not validate(state.get('root')):
             return False
+        self._clear_hint()
         for group in self._groups.values():
             self._settle_group_fullscreen(group)
         self._close_menu()
@@ -859,9 +841,8 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             return 'bottom', None
         return 'center', None
 
-    def _show_hint(self, group, edge, index):
-        for other in self._groups.values():
-            other.set_hint_visible(False)
+    def _show_hint(self, group, edge, index, *, label=None):
+        self._hint_leave_timer.stop()
         rect = group.rect().adjusted(3, 3, -3, -3)
         if edge == 'tabs':
             x = (group.tabs.tabRect(index).left() if index < group.tabs.count()
@@ -876,17 +857,28 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             rect.setHeight(rect.height() // 2)
             if edge == 'bottom':
                 rect.moveBottom(group.height() - 3)
-        group.hint.setText('' if edge == 'tabs' else f'拆分到{_EDGE_NAMES[edge]}' if edge in _EDGES else '移入此视图组')
-        group.hint.setGeometry(rect)
-        group.set_hint_visible(True)
-        group.hint.raise_()
+        if label is None:
+            label = '' if edge == 'tabs' else f'拆分到{_EDGE_NAMES[edge]}' if edge in _EDGES else '移入此视图组'
+        if group.hint.text() != label:
+            group.hint.setText(label)
+        if group.hint.geometry() != rect:
+            group.hint.setGeometry(rect)
+        if self._hint_group is not group:
+            self._clear_hint()
+            self._hint_group = group
+            group.hint.reveal()
+
+    def _clear_hint(self):
+        self._hint_leave_timer.stop()
+        if self._hint_group is not None:
+            self._hint_group.hint.dismiss()
+            self._hint_group = None
 
     def drop_hint_visible(self) -> bool:
         return any(not group.hint.isHidden() for group in self._groups.values())
 
     def cancel_drag(self):
-        for group in self._groups.values():
-            group.set_hint_visible(False)
+        self._clear_hint()
         QDrag.cancel()
 
     def eventFilter(self, watched, event):
@@ -937,9 +929,10 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             else:
                 self._show_hint(group, edge, index)
             return True
-        if event_type == QEvent.Type.DragLeave:
-            for candidate in self._groups.values():
-                candidate.set_hint_visible(False)
+        if event_type == QEvent.Type.DragLeave and self._hint_group is group:
+            # Qt also sends leave/enter when crossing children of the same group.
+            # A matching enter in this event turn keeps the current fill in flight.
+            self._hint_leave_timer.start(0)
         return super().eventFilter(watched, event)
 
     def apply_theme(self, dark, *, refresh_views=True):
@@ -949,6 +942,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
             f'ToolButton:hover{{background:{color("bg_muted", dark)};}}'
             f'ToolButton:pressed{{background:{rgba("primary", .12, dark)};}}')
         for group in self._groups.values():
+            group.hint.set_fill(color('primary', dark))
             group.more.setStyleSheet(tool_style)
             group.tabs.set_indicator_color(color('primary', dark))
             for index, key in enumerate(group.keys()):
@@ -972,7 +966,7 @@ class BScanWorkspace(BScanWorkspaceLink, QWidget):
                 'ToolButton{background:transparent;border:0;border-radius:4px;}'
                 f'ToolButton:hover{{background:{color("bg_muted", dark)};}}'
                 f'ToolButton:pressed{{background:{rgba("primary", .12, dark)};}}'
-                f'QLabel#bscanDropHint {{background:{rgba("primary", .16, dark)};border:2px solid {color("primary", dark)};'
+                f'QLabel#bscanDropHint {{background:transparent;border:2px solid {color("primary", dark)};'
                 f'color:{color("text_primary", dark)};}}')
             if refresh_views:
                 group.view.apply_theme(dark)

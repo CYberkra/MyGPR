@@ -2,11 +2,8 @@
 
 状态中文映射：queued 排队 / running 运行中 / completed 已完成 /
 failed 失败 / cancelled 已取消。
-徽章配色：白字彩底，颜色随主题查表（ui.theme_helpers.status_color，
-深色取同色相高亮度变体，保证深底对比度）；running 状态显示进度条。
+任务徽章使用与主题配对的前景和底色。确认了总量的活动任务显示进度。
 """
-
-import re
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
@@ -14,9 +11,9 @@ from PyQt6.QtWidgets import (QHBoxLayout, QHeaderView, QLabel,
                              QVBoxLayout, QWidget)
 from qfluentwidgets import ProgressBar, PushButton, ScrollArea
 
-from ui.motion import animate_badge_color, animate_progress
+from ui.motion import animate_progress, stop_progress
 from ui.page_scaffold import HintLabel, style_transparent_scroll
-from ui.theme_helpers import BADGE_QSS, status_color
+from ui.theme_helpers import badge_colors, badge_qss_pair
 
 _STATUS_TEXT = {
     'queued': '排队',
@@ -24,35 +21,49 @@ _STATUS_TEXT = {
     'completed': '已完成',
     'failed': '失败',
     'cancelled': '已取消',
+    'cancelling': '正在取消…',
 }
 
-# 状态 → status_color 语义键（queued/cancelled 灰色同 disabled）
 _STATUS_COLOR_KEY = {
-    'queued': 'disabled',
     'running': 'info',
     'completed': 'success',
     'failed': 'error',
-    'cancelled': 'disabled',
 }
 
 _ACTIVE_STATUSES = ('queued', 'running')
 
 
-def _status_badge_color(status: str) -> str:
-    """状态徽章底色（随主题）：未知状态回落 disabled 灰。"""
-    return status_color(_STATUS_COLOR_KEY.get(status, 'disabled'))
+def _set_status_badge(badge: QLabel, status: str) -> None:
+    badge.setText(_STATUS_TEXT.get(status, status))
+    badge.setStyleSheet(badge_qss_pair(*badge_colors(_STATUS_COLOR_KEY.get(status, 'neutral'))))
 
 
 def _make_status_badge(status: str) -> QLabel:
-    badge = QLabel(_STATUS_TEXT.get(status, status))
-    badge.setStyleSheet(BADGE_QSS % _status_badge_color(status))
+    badge = QLabel()
+    _set_status_badge(badge, status)
     return badge
 
 
-def _restyle_status_badge(badge: QLabel, status: str) -> None:
-    """不换文字只按状态重刷徽章配色（主题切换路径用，无渐变动画）。"""
-    color = _status_badge_color(status)
-    animate_badge_color(badge, BADGE_QSS, color, color)
+def set_job_progress(bar, completed: int, total: int, *, active: bool = True) -> None:
+    """A missing total has no percentage. Only animate a bar the user can see."""
+    if not active or total <= 0:
+        stop_progress(bar, 0)
+        bar.hide()
+        return
+    completed = max(0, min(int(completed), int(total)))
+    bar.setRange(0, int(total))
+    bar.show()
+    if bar.isVisible():
+        animate_progress(bar, completed)
+    else:
+        stop_progress(bar, completed)
+
+
+def progress_caption(completed: int, total: int, message: str) -> str:
+    if total <= 0:
+        return message or '运行中…'
+    percent = max(0, min(completed, total)) * 100 // total
+    return f'{percent}% · {message}' if message else f'{percent}%'
 
 
 class JobTable(QWidget):
@@ -78,6 +89,8 @@ class JobTable(QWidget):
         super().__init__(parent)
         self._rows = {}     # job_id -> row index
         self._badges = {}   # job_id -> 状态徽章 QLabel（复用，不重建）
+        self._bars = {}
+        self._cancel_pending = set()
         self._statuses = None
         self._actions = {}
         self._batches = {}
@@ -141,7 +154,7 @@ class JobTable(QWidget):
     def apply_theme(self, dark: bool) -> None:
         """主题切换：徽章配色按新主题重刷（空态 HintLabel 自刷，主窗口遍历调用）。"""
         for job_id, badge in self._badges.items():
-            _restyle_status_badge(badge, self._status_of(self._rows[job_id]))
+            _set_status_badge(badge, self._display_status(job_id))
 
     # ------------------------------------------------------------- 接口
     def upsert_job(self, job_id: str, title: str, *, before=None) -> None:
@@ -167,11 +180,18 @@ class JobTable(QWidget):
         marker.setData(Qt.ItemDataRole.UserRole, 'queued')
         self._table.setItem(row, self._COL_STATUS, marker)
 
-        bar = ProgressBar(self._table)
+        # The view controls its index widget's visibility when scrolling and
+        # filtering. Keep the actual bar inside it so unknown totals stay blank.
+        progress_cell = QWidget(self._table)
+        progress_layout = QHBoxLayout(progress_cell)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        bar = ProgressBar(progress_cell)
+        progress_layout.addWidget(bar)
         bar.setRange(0, 100)
         bar.setValue(0)
-        bar.setVisible(False)
-        self._table.setCellWidget(row, self._COL_PROGRESS, bar)
+        bar.hide()
+        self._bars[job_id] = bar
+        self._table.setCellWidget(row, self._COL_PROGRESS, progress_cell)
         self._table.setItem(row, self._COL_MESSAGE, QTableWidgetItem(''))
         cancel_btn = PushButton('取消', self._table)
         cancel_btn.clicked.connect(
@@ -186,40 +206,41 @@ class JobTable(QWidget):
         row = self._rows.get(job_id)
         if row is None:
             return
-        bar = self._table.cellWidget(row, self._COL_PROGRESS)
-        if total and total > 0:
-            bar.setRange(0, int(total))
-            animate_progress(bar, min(int(completed), int(total)))
-        else:
-            bar.setRange(0, 100)
-            animate_progress(bar, int(completed))
-        bar.setVisible(True)
-        self._table.item(row, self._COL_MESSAGE).setText(message or '')
-        self._table.item(row, self._COL_MESSAGE).setToolTip(message or '')
+        bar = self._bars[job_id]
+        active = self._status_of(row) in _ACTIVE_STATUSES
+        set_job_progress(bar, completed, total, active=active)
+        item = self._table.item(row, self._COL_MESSAGE)
+        item.setText(progress_caption(completed, total, message) if active else message or '')
+        item.setToolTip(message or '')
+        item.setData(Qt.ItemDataRole.UserRole, message or '')
 
     def set_status(self, job_id: str, status: str) -> None:
         row = self._rows.get(job_id)
         if row is None:
             return
-        badge = self._badges.get(job_id)
-        if badge is not None:
-            end_hex = _status_badge_color(status)
-            badge.setText(_STATUS_TEXT.get(status, status))
-            # 从徽章当前背景色渐变到新状态色（qss 模板同源，见 ui.motion）
-            match = re.search(r'background-color:\s*(#[0-9a-fA-F]{6})',
-                              badge.styleSheet())
-            start_hex = match.group(1) if match else _status_badge_color(status)
-            animate_badge_color(badge, BADGE_QSS, start_hex, end_hex)
         item = self._table.item(row, self._COL_STATUS)
-        if item is not None:
-            item.setData(Qt.ItemDataRole.UserRole, status)
-        bar = self._table.cellWidget(row, self._COL_PROGRESS)
-        bar.setVisible(status == 'running')
+        item.setData(Qt.ItemDataRole.UserRole, status)
+        if status not in _ACTIVE_STATUSES:
+            self._cancel_pending.discard(job_id)
+            set_job_progress(self._bars[job_id], 0, 0)
+            message = self._table.item(row, self._COL_MESSAGE)
+            message.setText(message.data(Qt.ItemDataRole.UserRole) or '')
+        _set_status_badge(self._badges[job_id], self._display_status(job_id))
         self._sync_action(job_id)
         if job_id in self._parent_batch:
             self._update_batch(self._parent_batch[job_id])
         self._refresh_rows()
         self.rows_changed.emit()
+
+    def _display_status(self, job_id):
+        return 'cancelling' if job_id in self._cancel_pending else self._status_of(self._rows[job_id])
+
+    def set_cancel_pending(self, job_id):
+        if self.can_cancel(job_id):
+            self._cancel_pending.add(job_id)
+            _set_status_badge(self._badges[job_id], 'cancelling')
+            self._sync_action(job_id)
+            self.rows_changed.emit()
 
     def set_job_action(self, job_id: str, label: str) -> None:
         if job_id in self._rows:
@@ -228,15 +249,15 @@ class JobTable(QWidget):
 
     def _sync_action(self, job_id):
         row = self._rows[job_id]
-        active = self._status_of(row) in _ACTIVE_STATUSES
+        active = self.can_cancel(job_id)
         if job_id in self._batches:
             label = '收起测线' if job_id in self._expanded_batches else '查看测线'
         else:
-            label = '取消' if active else self._actions.get(job_id, '')
+            label = '取消' if active or job_id in self._cancel_pending else self._actions.get(job_id, '')
         button = self._table.cellWidget(row, self._COL_ACTION)
         button.setText(label)
         button.setVisible(bool(label))
-        button.setEnabled(bool(label))
+        button.setEnabled(bool(label) and job_id not in self._cancel_pending)
 
     def activate_job(self, job_id):
         if job_id in self._batches:
@@ -291,6 +312,8 @@ class JobTable(QWidget):
             self._table.removeRow(row)
             self._rows.pop(job_id, None)
             self._badges.pop(job_id, None)
+            self._bars.pop(job_id, None)
+            self._cancel_pending.discard(job_id)
             self._actions.pop(job_id, None)
             self._batches.pop(job_id, None)
             self._parent_batch.pop(job_id, None)
@@ -322,14 +345,15 @@ class JobTable(QWidget):
         return {
             'job_id': job_id,
             'title': title.text() if title is not None else '',
-            'message': message.text() if message is not None else '',
+            'message': (message.data(Qt.ItemDataRole.UserRole) or '') if message is not None else '',
             'status': status,
-            'status_text': _STATUS_TEXT.get(status, status),
+            'status_text': self._badges[job_id].text(),
         }
 
     def can_cancel(self, job_id: str) -> bool:
         row = self._rows.get(job_id)
-        return row is not None and job_id not in self._batches and self._status_of(row) in _ACTIVE_STATUSES
+        return (row is not None and job_id not in self._batches and job_id not in self._cancel_pending
+                and self._status_of(row) in _ACTIVE_STATUSES)
 
     def cancel_job(self, job_id: str) -> None:
         if self.can_cancel(job_id):
@@ -390,6 +414,7 @@ class MiniJobList(QWidget):
         bar = ProgressBar(row_widget)
         bar.setRange(0, 100)
         bar.setValue(0)
+        bar.hide()
         cancel_btn = PushButton('取消', row_widget)
         cancel_btn.setFixedWidth(60)
         cancel_btn.clicked.connect(
@@ -412,12 +437,7 @@ class MiniJobList(QWidget):
         if entry is None:
             return
         bar = entry['bar']
-        if total and total > 0:
-            bar.setRange(0, int(total))
-            animate_progress(bar, min(int(completed), int(total)))
-        else:
-            bar.setRange(0, 100)
-            animate_progress(bar, int(completed))
+        set_job_progress(bar, completed, total, active=entry['status'] in _ACTIVE_STATUSES)
         if message:
             entry['title_label'].setToolTip(message)
 
@@ -425,12 +445,10 @@ class MiniJobList(QWidget):
         entry = self._jobs.get(job_id)
         if entry is None:
             return
-        old_hex = _status_badge_color(entry['status'])
         entry['status'] = status
-        badge = entry['badge']
-        end_hex = _status_badge_color(status)
-        badge.setText(_STATUS_TEXT.get(status, status))
-        animate_badge_color(badge, BADGE_QSS, old_hex, end_hex)
+        _set_status_badge(entry['badge'], status)
+        if status not in _ACTIVE_STATUSES:
+            set_job_progress(entry['bar'], 0, 0)
         entry['cancel'].setEnabled(status in _ACTIVE_STATUSES)
         self._refresh_visibility()
 
@@ -444,7 +462,7 @@ class MiniJobList(QWidget):
     def apply_theme(self, dark: bool) -> None:
         """主题切换：徽章配色按新主题重刷（空态 HintLabel 自刷，主窗口遍历调用）。"""
         for entry in self._jobs.values():
-            _restyle_status_badge(entry['badge'], entry['status'])
+            _set_status_badge(entry['badge'], entry['status'])
 
     # ------------------------------------------------------------- 内部
     def _remove_row(self, job_id):

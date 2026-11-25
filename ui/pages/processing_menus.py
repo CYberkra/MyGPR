@@ -6,8 +6,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from ui.file_tree import artifact_direct_parent, artifact_parameters
-from ui.widgets.context_menus import make_menu
-from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
+from ui.widgets.context_menus import make_menu, show_menu
 from ui.widgets.object_context_menu import object_action, show_details
 from ui.result_presentation import describe_artifact
 
@@ -160,6 +159,4 @@ class ProcessingMenus:
 
     def _show_draft_menu(self):
         menu = self._draft_menu()
-        menu._object_keyboard = FluentMenuKeyboard(menu)
-        menu.exec(self._draft_menu_btn.mapToGlobal(self._draft_menu_btn.rect().bottomLeft()))
-        menu._object_keyboard.focus_menu(menu)
+        show_menu(menu, self._draft_menu_btn.mapToGlobal(self._draft_menu_btn.rect().bottomLeft()))

@@ -19,7 +19,9 @@ from qfluentwidgets import RoundMenu, Theme, isDarkTheme, setTheme
 from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
 from ui import constants
+from ui.fluent_motion import patch_background_motion, patch_dialog_motion, patch_menu_motion
 from ui.fluent_style_lifetime import patch_dynamic_style_lifetime
+from ui.motion import finish_animation
 
 if TYPE_CHECKING:
     from PyQt6.QtWidgets import QLabel   # 仅 make_badge 返回注解用
@@ -243,9 +245,8 @@ def badge_colors(key: str) -> tuple:
 
 
 # 药丸徽章 QSS 模板（单源，两种变体）：
-# - BADGE_QSS：白字 + 实色彩底（任务中心/方法浏览器；单 %s 占位底色，
-#   ui.motion.animate_badge_color 依赖该单占位做正则回填，勿改双占位）；
-# - BADGE_QSS_PAIR：彩字 + 淡彩底（随 badge_colors 色对，浅色主题用）。
+# - BADGE_QSS：白字 + 实色彩底，供保留单色背景的控件使用。
+# - BADGE_QSS_PAIR：主题前景和底色配对使用，包括任务状态徽章。
 # 字号统一 FONT_SIZE_SECONDARY（9pt = 原 12px 等值）。
 _BADGE_QSS_BODY = ('QLabel { padding: 2px 10px; border-radius: 10px; '
                    f'font-size: {constants.FONT_SIZE_SECONDARY}pt; '
@@ -336,6 +337,7 @@ def _refresh_native_view_palettes(app: QApplication, palette: QPalette) -> None:
     New widgets inherit the current application palette and the stable rules.
     """
     for widget in app.allWidgets():
+        finish_animation(getattr(widget, 'backgroundColorAni', None))
         if (not isinstance(widget, (QAbstractItemView, QTabBar, QTabWidget))
                 and not widget.inherits('QTableCornerButton')):
             continue
@@ -446,4 +448,7 @@ def log_panel_qss(variant: str = 'terminal') -> str:
 # 模块导入即生效（style_spec §2.9 / §7.4-9）
 patch_dynamic_style_lifetime()
 patch_round_menu_style_lifetime()
+patch_background_motion()
+patch_menu_motion()
+patch_dialog_motion()
 patch_combo_box_menu()

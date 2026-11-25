@@ -38,6 +38,7 @@ class ProcessingChain:
         self._estimate_token = ''
         self.batch_job_ids = set()
         self.batch_errors = []
+        self._batch_cancelled = 0
         self._batch_submitting = False
         self._batch_pending_completions = []
         self._batch_rejected_jobs = []
@@ -114,6 +115,8 @@ class ProcessingChain:
             prc.methods_loaded.connect(self.on_methods_loaded)
             if hasattr(prc, 'run_submitted'):
                 prc.run_submitted.connect(self.on_run_submitted)
+            if hasattr(prc, 'scoped_job_submitted'):
+                prc.scoped_job_submitted.connect(co.jobs.register_scoped_failure)
             if hasattr(prc, 'pipeline_job_registered'):
                 prc.pipeline_job_registered.connect(co.jobs.register_processing)
                 prc.pipeline_job_rejected.connect(self.on_pipeline_job_rejected)
@@ -127,9 +130,9 @@ class ProcessingChain:
                 prc.estimate_finished.connect(self.on_estimate_finished)
                 prc.estimate_failed.connect(self.on_estimate_failed)
             prc.autotune_finished.connect(self.on_autotune_finished)
-            prc.autotune_failed.connect(self.on_autotune_failed)
+            getattr(prc, 'autotune_context_failed', prc.autotune_failed).connect(self.on_autotune_failed)
             prc.velocity_finished.connect(self.on_velocity_finished)
-            prc.velocity_failed.connect(self.on_velocity_failed)
+            getattr(prc, 'velocity_context_failed', prc.velocity_failed).connect(self.on_velocity_failed)
 
         # ---------------- 解释控制器 → 本链 / 解释页
         ic = co.interpretation_controller
@@ -168,7 +171,9 @@ class ProcessingChain:
             pc.artifacts_updated.connect(self._on_reconfigure_artifacts)
             pc.depth_preview_ready.connect(self.on_depth_preview_ready)
             pc.depth_layer_saved.connect(self.on_depth_layer_saved)
-            pc.depth_save_failed.connect(self.on_depth_save_failed)
+            if hasattr(pc, 'depth_job_submitted'):
+                pc.depth_job_submitted.connect(co.jobs.register_scoped_failure)
+            getattr(pc, 'depth_save_context_failed', pc.depth_save_failed).connect(self.on_depth_save_failed)
 
     # ============================================================ 处理域
     def on_methods_loaded(self, methods: list) -> None:
@@ -285,6 +290,7 @@ class ProcessingChain:
         self.batch_job_ids = set(jobs)
         self._co.jobs.register_batch([*jobs, *self._batch_rejected_jobs])
         self.batch_errors = ['提交失败'] * max(0, len(line_ids) - len(jobs))
+        self._batch_cancelled = 0
         self._co.infobar('warning' if self.batch_errors else 'info', '批量处理',
                          f'已提交 {len(jobs)}/{len(line_ids)} 条测线')
         pending, self._batch_pending_completions = self._batch_pending_completions, []
@@ -336,12 +342,8 @@ class ProcessingChain:
             tree.set_processing_input(line_id, input_artifact_id, True)
 
     def on_processing_cancel(self) -> None:
-        bridge = self._co.job_bridge()
-        if bridge is not None and self.processing_job_id:
-            self.processing_cancel_requested = True
-            bridge.cancel(self.processing_job_id)
-            self._co.log_message(
-                f'INFO 已请求取消处理任务 {self.processing_job_id}')
+        if self.processing_job_id:
+            self._co.jobs.on_cancel(self.processing_job_id)
 
     def on_run_context_finished(self, job_id: str, success: bool, message: str) -> None:
         job_id = str(job_id)
@@ -353,14 +355,23 @@ class ProcessingChain:
         if job_id in self.batch_job_ids:
             self.batch_job_ids.discard(job_id)
             if not success:
-                self.batch_errors.append(message or job_id)
+                if self._co.jobs.terminal_status(job_id) == 'cancelled':
+                    self._batch_cancelled += 1
+                else:
+                    self.batch_errors.append(message or job_id)
             if self._co.project_controller is not None:
                 self._co.project_controller.refresh_artifacts(
                     str(self._co.project.current_line_id))
                 self._co.project_controller.refresh_lines()
             if not self.batch_job_ids:
-                if self.batch_errors:
-                    self._co.infobar('warning', '批量处理', f'完成，{len(self.batch_errors)} 条失败；详见任务记录')
+                if self.batch_errors or self._batch_cancelled:
+                    parts = []
+                    if self.batch_errors:
+                        parts.append(f'{len(self.batch_errors)} 条失败')
+                    if self._batch_cancelled:
+                        parts.append(f'{self._batch_cancelled} 条已取消')
+                    self._co.infobar('warning' if self.batch_errors else 'info', '批量处理',
+                                     '，'.join(parts) + '，详见任务记录')
                 else:
                     self._co.infobar('success', '批量处理', '所选测线全部处理完成')
             return
@@ -374,8 +385,9 @@ class ProcessingChain:
         用户主动取消按 info 提示而非错误；成果刷新回到提交时的测线，
         只有该测线仍是当前测线时才自动预览最新成果。
         """
+        cancelled = (not success and self.processing_job_id
+                     and self._co.jobs.terminal_status(self.processing_job_id) == 'cancelled')
         self.processing_job_id = ''
-        cancelled = self.processing_cancel_requested
         self.processing_cancel_requested = False
         run_line_id = str(self.processing_line_id
                           or self._co.project.current_line_id)
@@ -422,8 +434,10 @@ class ProcessingChain:
         processing.set_autotune_result(method_id, result)
         self._co.infobar('success', 'AutoTune 自动调参', f'调参完成：{method_id}')
 
-    def on_autotune_failed(self, method_id: str, message: str) -> None:
+    def on_autotune_failed(self, method_id: str, message: str, job_id: str = '') -> None:
         self._co.page('processingInterface').set_autotune_failed(method_id)
+        if job_id and self._co.jobs.terminal_status(job_id) == 'cancelled':
+            return
         self._co.infobar('error', 'AutoTune 自动调参',
                          f'{method_id}: {message}')
 
@@ -481,8 +495,11 @@ class ProcessingChain:
         self._co.infobar('success', '速度分析', f'速度模型已写回：{line_id}')
 
     def on_velocity_failed(self, token: str, project_id: str,
-                           line_id: str, message: str) -> None:
+                           line_id: str, message: str, job_id: str = '') -> None:
         if not self._velocity_callback_current(token, project_id, line_id):
+            return
+        if job_id and self._co.jobs.terminal_status(job_id) == 'cancelled':
+            self._co.page('interpretationInterface').set_velocity_running(False)
             return
         self._co.page('interpretationInterface').set_velocity_failed(message)
         self._co.infobar('error', '速度分析', f'{line_id}: {message}')
@@ -619,5 +636,7 @@ class ProcessingChain:
         self._co.log_message(
             f'SUCCESS 深度图层已保存：{len(line_ids)} 条测线，任务 {job_id[:8]}…')
 
-    def on_depth_save_failed(self, message: str) -> None:
+    def on_depth_save_failed(self, message: str, job_id: str = '') -> None:
+        if job_id and self._co.jobs.terminal_status(job_id) == 'cancelled':
+            return
         self._co.infobar('error', '深度图层', message or '深度图层任务失败', duration=8000)

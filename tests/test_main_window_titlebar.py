@@ -86,6 +86,52 @@ def window(qapp, monkeypatch, tmp_path, request):
     qapp.processEvents()
 
 
+def test_motion_setting_settles_progress_and_rolls_back_failed_preference(window, monkeypatch):
+    from types import SimpleNamespace
+    from PyQt6.QtCore import QAbstractAnimation
+    from PyQt6.QtWidgets import QProgressBar, QRadioButton
+
+    from ui import motion
+    from ui.settings_manager import SettingsManager
+
+    monkeypatch.setattr(motion.ctypes, 'windll', SimpleNamespace(
+        user32=SimpleNamespace(SystemParametersInfoW=lambda *args: 0)), raising=False)
+    settings = window._page('settingsInterface')
+    settings._select_category('appearance')
+    reduced = settings.findChild(QRadioButton, 'settingsMotionReduced')
+    system = settings.findChild(QRadioButton, 'settingsMotionSystem')
+    progress = QProgressBar(window)
+    progress.setRange(0, 100)
+    progress.setValue(0)
+    try:
+        motion.animate_progress(progress, 68)
+        assert progress._motion_anim.state() == QAbstractAnimation.State.Running
+        reduced.click()
+        assert progress._motion_anim.state() == QAbstractAnimation.State.Stopped
+        assert progress.value() == 68
+        assert not motion.animations_enabled()
+        assert SettingsManager(window.settings.settings_file).get('motion_preference') == 'reduce'
+
+        monkeypatch.setattr(window.settings, 'save', lambda: False)
+        system.click()
+        assert reduced.isChecked()
+        assert not motion.animations_enabled()
+    finally:
+        motion.set_reduced_motion(False)
+
+
+def test_theme_switch_applies_fluent_window_background_immediately(window):
+    from ui import constants
+
+    try:
+        window._on_theme_changed(constants.THEME_DARK)
+        assert window.backgroundColor == window._normalBackgroundColor()
+        window._on_theme_changed(constants.THEME_LIGHT)
+        assert window.backgroundColor == window._normalBackgroundColor()
+    finally:
+        window._on_theme_changed(constants.THEME_LIGHT)
+
+
 def test_titlebar_buttons_receive_mouse(window):
     """三个标题栏按钮中心的最上层 widget 必须是按钮自身（落在 titleBar 内）。"""
     for attr in ('minBtn', 'maxBtn', 'closeBtn'):

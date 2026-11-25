@@ -7,6 +7,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtWidgets import QBoxLayout, QVBoxLayout, QWidget
 
+from ui.design_tokens import duration
 from ui.motion import animations_enabled
 
 __all__ = ['FullscreenHost']
@@ -31,7 +32,7 @@ class FullscreenHost(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self._animation = QPropertyAnimation(self, b'geometry', self)
-        self._animation.setDuration(220)
+        self._animation.setDuration(duration('fullscreen'))
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._animation.finished.connect(self._finish_animation)
         self._escape_shortcut = QShortcut(QKeySequence('Escape'), self)
@@ -142,6 +143,14 @@ class FullscreenHost(QWidget):
             self.state = 'fullscreen'
         else:
             self.settle()
+
+    def settle_motion(self) -> None:
+        if self.state in ('expanding', 'collapsing'):
+            target = self._animation.endValue()
+            if target is not None:
+                self._animation.stop()
+                self.setGeometry(target)
+                self._finish_animation()
 
     def captured_geometry(self) -> QByteArray:
         return self.saveGeometry()

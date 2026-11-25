@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import SegmentedWidget, isDarkTheme, setCustomStyleSheet
 
 from ui import constants, motion
+from ui.design_tokens import duration
 
 __all__ = ['SlimSegment']
 
@@ -35,6 +36,7 @@ class SlimSegment(SegmentedWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.slideAni.setDuration(duration('selection'))
         setCustomStyleSheet(self, self._QSS, self._QSS)
 
     def addItem(self, routeKey, text, onClick=None, icon=None):
@@ -55,6 +57,10 @@ class SlimSegment(SegmentedWidget):
             # Pivot first snaps to the previous item's logical x. Overwrite
             # from the on-screen position when selection interrupts a slide.
             self.slideAni.startAnimation(self.currentIndicatorGeometry(), previous_position)
+
+    def settle_motion(self) -> None:
+        if self.currentItem() is not None:
+            self._adjustIndicatorPos()
 
     def paintEvent(self, e):
         QWidget.paintEvent(self, e)   # 跳过库版的指示条/滑块绘制，下面只画滑块

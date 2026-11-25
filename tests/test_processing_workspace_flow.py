@@ -91,6 +91,36 @@ def test_cancel_preserves_submitted_draft(page):
     assert page.current_pipeline()['steps'][0]['params'] == {'window': 41}
 
 
+def test_new_job_drops_old_motion_and_waits_for_real_totals(page, qapp, monkeypatch):
+    from PyQt6.QtCore import QAbstractAnimation
+    from ui import motion
+
+    monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
+    page.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
+    page.show()
+    page.set_running(True, 'first')
+    page.set_progress(40, 100, '滤波')
+    bar = page._progress_bar
+    animation = bar._motion_anim
+    animation.setCurrentTime(60)
+    assert animation.state() == QAbstractAnimation.State.Running
+    page.set_running(False, success=False)
+    page.set_running(True, 'next')
+    assert animation.state() == QAbstractAnimation.State.Stopped
+    assert bar.getVal() == 0 and bar.isHidden()
+    page.set_progress(9, 0, '读取测线')
+    assert bar.isHidden() and page._progress_label.text() == '读取测线'
+    page.set_cancel_pending('first')
+    assert page._cancel_btn.isEnabled()
+    page.set_cancel_pending('next')
+    page.set_progress(3, 10, '写入中')
+    assert page._cancel_btn.text() == '正在取消…' and not page._cancel_btn.isEnabled()
+    assert page._progress_label.text() == '30% · 写入中'
+    page.set_running(False, success=False)
+    assert animation.state() == QAbstractAnimation.State.Stopped
+    assert bar.isHidden() and page._cancel_btn.isHidden()
+
+
 def test_closing_raw_and_all_views_never_reopens_them(page):
     page.select_artifact('A')
     page._workspace.close_source('original')

@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 import pyqtgraph as pg
-from qfluentwidgets import InfoBar
+from ui.widgets.info_bar import InfoBar
 
 from ui import constants
 from ui.desktop_backend_facade import (

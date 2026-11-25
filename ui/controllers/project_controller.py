@@ -99,7 +99,9 @@ class ProjectController(QObject):
     spatial_tracks_ready = pyqtSignal(list)      # list[SpatialTrack]
     depth_preview_ready = pyqtSignal(object, list, float, int)  # payload, line_ids, cell_size_m, generation
     depth_layer_saved = pyqtSignal(str, list, float)       # job_id, line_ids, cell_size_m
-    depth_save_failed = pyqtSignal(str)                    # message
+    depth_job_submitted = pyqtSignal(str)
+    depth_save_failed = pyqtSignal(str)
+    depth_save_context_failed = pyqtSignal(str, str)        # message, job_id (empty before submission)
     artifact_descendants_ready = pyqtSignal(str, list, dict)  # line_id, 后代闭包, {artifact_id: 名称}
     line_source_path_ready = pyqtSignal(str, object)          # line_id, 源文件路径|None
     line_sensor_summary_ready = pyqtSignal(str, str)         # line_id, compact availability text
@@ -746,10 +748,11 @@ class ProjectController(QObject):
             _LOGGER.exception("深度图层提交失败")
             message = friendly_error_message(exc)
             self.log_message.emit(f"深度图层提交失败：{message}")
+            self.depth_save_context_failed.emit(message, '')
             self.depth_save_failed.emit(message)
             return None
         self.log_message.emit(f"深度图层任务已提交：{job_id[:8]}…")
-        bridge.watch(job_id, title="网格化界面深度图层")
+        self.depth_job_submitted.emit(job_id)
 
         def _on_done(job_id_: str, success: bool, message: str, _result: object) -> None:
             if job_id_ != job_id:
@@ -761,9 +764,12 @@ class ProjectController(QObject):
             if success:
                 self.depth_layer_saved.emit(job_id_, line_ids, float(cell_size_m or 1.0))
             else:
-                self.depth_save_failed.emit(message or "深度图层任务失败")
+                error = message or "深度图层任务失败"
+                self.depth_save_context_failed.emit(error, job_id)
+                self.depth_save_failed.emit(error)
 
         bridge.job_completed.connect(_on_done)
+        bridge.watch(job_id, title="网格化界面深度图层")
         return job_id
 
 

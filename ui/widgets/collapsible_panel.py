@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import FluentIcon as FIF, PushButton, themeColor
 
 from ui import motion
+from ui.design_tokens import duration
 
 _EXPAND_BUTTON_WIDTH = 20
 
@@ -94,7 +95,7 @@ class CollapsiblePanel(QWidget):
 
         # 动画
         self._animation = QPropertyAnimation(self, b'maximumWidth', self)
-        self._animation.setDuration(220)
+        self._animation.setDuration(duration('fold'))
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._animation.valueChanged.connect(self._on_width_changed)
         self._animation.finished.connect(self._on_animation_finished)
@@ -191,11 +192,14 @@ class CollapsiblePanel(QWidget):
         self._update_button_icon()
         self.sig_collapsed.emit(self._collapsed)
 
-    def hideEvent(self, event) -> None:
+    def settle_motion(self) -> None:
         if self._animating:
             self._animation.stop()
             self.setMaximumWidth(self._collapse_width if self._collapsed else self._expand_width)
             self._on_animation_finished()
+
+    def hideEvent(self, event) -> None:
+        self.settle_motion()
         super().hideEvent(event)
 
     def _update_button_icon(self) -> None:

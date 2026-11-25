@@ -9,11 +9,12 @@ import pytest
 
 pytest.importorskip('PyQt6')
 
-from PyQt6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, Qt
+from PyQt6.QtCore import QAbstractAnimation, QCoreApplication, QEvent, QPoint, QPointF, QRect, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent, QKeyEvent
-from PyQt6.QtTest import QTest
+from PyQt6.QtTest import QSignalSpy, QTest
 from PyQt6.QtWidgets import QApplication, QLineEdit, QSplitter, QTabBar, QVBoxLayout, QWidget
 
+from ui import motion
 from ui.widgets.bscan_workspace import BScanWorkspace
 
 
@@ -123,6 +124,49 @@ def test_async_refill_renders_only_visible_groups_without_stealing_focus(workspa
     workspace.open_source('A')
     assert workspace.primary_view()._matrix is replacement.matrix
     assert 'B' not in workspace.tab_keys()
+
+
+def test_source_indicator_survives_refill_and_retargets_on_keyboard_selection(workspace, qapp, monkeypatch):
+    monkeypatch.setattr('ui.motion.animations_enabled', lambda: True)
+    workspace.resize(1500, 520)
+    catalog = sources('A', 'B', 'C', 'D')
+    catalog[1]['bundle'] = None
+    workspace.set_sources(catalog)
+    for source in catalog:
+        workspace.open_source(source['key'])
+    first = workspace.group_ids()[0]
+    second = workspace.split_source('D', 'right')
+    workspace.open_source('A', first)
+    tabs = workspace.tab_bar(first)
+    tabs.setFocus()
+    qapp.processEvents()
+    tabs.settle_motion()
+    other_view = workspace.group_widget(second).view
+    other_view._plot.vb.setRange(xRange=(1, 5), yRange=(2, 4), padding=0)
+    other_range = other_view._plot.vb.viewRange()
+
+    QTest.mouseClick(tabs, Qt.MouseButton.LeftButton, pos=tabs.tabRect(1).center())
+    assert workspace.active_key() == 'B'
+    animation = tabs.indicator_animation
+    assert animation.state() == QAbstractAnimation.State.Running
+    animation.setCurrentTime(animation.duration() // 3)
+    current = tabs.indicator.geometry()
+    elapsed = animation.currentTime()
+    catalog[1]['bundle'] = bundle(18)
+    workspace.set_sources(catalog)
+    assert workspace.primary_view()._matrix is catalog[1]['bundle'].matrix
+    assert animation.currentTime() == elapsed
+    assert tabs.indicator.geometry() == current
+    assert animation.state() == QAbstractAnimation.State.Running
+
+    QTest.keyClick(tabs, Qt.Key.Key_Right)
+    assert workspace.active_key() == 'C'
+    assert workspace.primary_view()._matrix is catalog[2]['bundle'].matrix
+    assert animation.startValue() == current
+    animation.setCurrentTime(animation.duration())
+    rect = tabs.tabRect(tabs.currentIndex())
+    assert tabs.indicator.geometry() == QRect(rect.left(), rect.bottom() - 1, rect.width(), 2)
+    assert other_view._plot.vb.viewRange() == other_range
 
 
 def test_split_move_reorder_and_empty_group_collapse_share_matrix(workspace):
@@ -335,19 +379,69 @@ def test_qt_drop_reorders_tabs_splits_at_edge_and_escape_cancels_hint(workspace,
     assert workspace.drop_hint_visible()
     QApplication.sendEvent(bar, QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Escape,
                                          Qt.KeyboardModifier.NoModifier))
-    for candidate in workspace._groups.values():
-        candidate.hint_animation.setCurrentTime(100)
-    qapp.processEvents()
     assert not workspace.drop_hint_visible()
     assert len(workspace.views()) == 1
     deliver_drag(workspace, group, 'A', first, edge)
     qapp.processEvents()
     assert len(workspace.views()) == 2
     assert workspace.tab_keys(workspace.group_ids()[1]) == ['A']
-    for candidate in workspace._groups.values():
-        candidate.hint_animation.setCurrentTime(100)
-    qapp.processEvents()
     assert not workspace.drop_hint_visible()
+
+
+def test_drag_moves_only_fade_once_per_group_and_closing_target_clears_hint(workspace, qapp, monkeypatch):
+    monkeypatch.setattr('ui.motion.animations_enabled', lambda: True)
+    workspace.set_sources(sources('A', 'B', 'C'))
+    for key in ('A', 'B', 'C'):
+        workspace.open_source(key)
+    origin = workspace.group_ids()[0]
+    target = workspace.split_source('C', 'right')
+    qapp.processEvents()
+    first, second = workspace.group_widget(origin), workspace.group_widget(target)
+    first_changes = QSignalSpy(first.hint.animation.stateChanged)
+    second_changes = QSignalSpy(second.hint.animation.stateChanged)
+    edge = QPoint(first.width() - 4, first.height() // 2)
+    deliver_drag(workspace, first, 'B', origin, edge, drop=False)
+    assert first.hint.isVisible() and first.hint.text() == '拆分到右侧'
+    first.hint.animation.setCurrentTime(first.hint.animation.duration() // 3)
+    deliver_drag(workspace, first, 'B', origin, edge - QPoint(1, 0), drop=False)
+    deliver_drag(workspace, first, 'B', origin, first.rect().center(), drop=False)
+    assert first.hint.text() == '移入此视图组'
+    assert len(first_changes) == 1 and len(second_changes) == 0
+
+    deliver_drag(workspace, second, 'B', origin, second.rect().center(), drop=False)
+    assert first.hint.isHidden() and first.hint.animation.state() == QAbstractAnimation.State.Stopped
+    assert second.hint.isVisible() and len(second_changes) == 1
+    workspace.close_tab('C', target)
+    assert not workspace.drop_hint_visible()
+    assert second.hint.isHidden() and second.hint.animation.state() == QAbstractAnimation.State.Stopped
+    assert workspace.tab_keys(origin) == ['A', 'B']
+
+
+def test_reduced_motion_keeps_current_tab_and_drop_target_visible(workspace, monkeypatch):
+    monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
+    workspace.set_sources(sources('A', 'B'))
+    workspace.open_source('A')
+    workspace.open_source('B')
+    group = workspace.group_widget()
+    tabs = group.tabs
+    QTest.keyClick(tabs, Qt.Key.Key_Left)
+    assert workspace.active_key() == 'A'
+    deliver_drag(workspace, group, 'B', group.group_id, group.rect().center(), drop=False)
+    assert tabs.indicator_animation.state() == QAbstractAnimation.State.Running
+    assert group.hint.animation.state() == QAbstractAnimation.State.Running
+    monkeypatch.setattr(motion, 'animations_enabled', lambda: False)
+    motion.settle_window_motion(workspace)
+    rect = tabs.tabRect(0)
+    assert tabs.indicator.geometry() == QRect(rect.left(), rect.bottom() - 1, rect.width(), 2)
+    assert tabs.indicator_animation.state() == QAbstractAnimation.State.Stopped
+    assert group.hint.isVisible() and group.hint.text() == '移入此视图组'
+    assert group.hint._opacity == 1.0
+    assert group.hint.animation.state() == QAbstractAnimation.State.Stopped
+    workspace.cancel_drag()
+    deliver_drag(workspace, group, 'B', group.group_id, group.rect().center(), drop=False)
+    assert group.hint.isVisible() and group.hint.animation.state() == QAbstractAnimation.State.Stopped
+    workspace.hide()
+    assert group.hint.isHidden()
 
 
 def test_reset_layout_preserves_open_resources_pins_and_closed_history(workspace):

@@ -22,9 +22,6 @@ class BScanLineDrop(QObject):
 
     def eventFilter(self, watched, event):
         kind = event.type()
-        if kind == QEvent.Type.DragLeave:
-            self.hide_hints()
-            return False
         if kind not in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop):
             return False
         line_id = self.owner.read_mime(event.mimeData())
@@ -38,12 +35,10 @@ class BScanLineDrop(QObject):
             self.hide_hints()
             self.owner.open_line(line_id, group.group_id, edge, index)
         else:
-            self.workspace._show_hint(group, edge, index)
-            if edge != 'tabs':
-                group.hint.setText(f'{self.owner.label(line_id)} · ' +
-                    ('添加对比标签' if edge == 'center' else '在高亮区域分屏对比'))
+            action = '添加对比标签' if edge == 'center' else '在高亮区域分屏对比'
+            label = '' if edge == 'tabs' else f'{self.owner.label(line_id)} · {action}'
+            self.workspace._show_hint(group, edge, index, label=label)
         return True
 
     def hide_hints(self):
-        for group in self.workspace._groups.values():
-            group.hint.hide()
+        self.workspace._clear_hint()

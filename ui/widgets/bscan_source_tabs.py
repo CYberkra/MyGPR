@@ -1,10 +1,63 @@
 """Tab interaction shared by B-scan workspace groups."""
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRect, Qt
-from PyQt6.QtGui import QDrag
-from PyQt6.QtWidgets import QApplication, QTabBar, QWidget
+from PyQt6.QtCore import QAbstractAnimation, QEasingCurve, QPropertyAnimation, QRect, Qt, QVariantAnimation
+from PyQt6.QtGui import QColor, QDrag, QPainter
+from PyQt6.QtWidgets import QApplication, QLabel, QTabBar, QWidget
 from qfluentwidgets import FluentIcon as FIF, ToolButton
 from ui import motion
+from ui.design_tokens import duration
 from ui.widgets.context_menus import bind_menu_keys
+
+
+class _DropHint(QLabel):
+    """Paint the drop outline and action immediately; fade only the fill."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setObjectName('bscanDropHint')
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._fill = QColor()
+        self._opacity = 1.0
+        self.animation = QVariantAnimation(self)
+        self.animation.setDuration(duration('drop_hint'))
+        self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.animation.setStartValue(0.0)
+        self.animation.setEndValue(1.0)
+        self.animation.valueChanged.connect(self._set_opacity)
+        self.hide()
+
+    def set_fill(self, color):
+        self._fill = QColor(color)
+        self._fill.setAlphaF(0.16)
+        self.update()
+
+    def _set_opacity(self, value):
+        self._opacity = value
+        self.update()
+
+    def paintEvent(self, event):
+        with QPainter(self) as painter:
+            painter.setOpacity(self._opacity)
+            painter.fillRect(event.rect(), self._fill)
+        super().paintEvent(event)
+
+    def reveal(self):
+        self.show()
+        self.raise_()
+        if self.isVisible() and motion.animations_enabled():
+            self._set_opacity(0.0)
+            self.animation.start()
+        else:
+            self.settle_motion()
+
+    def dismiss(self):
+        self.animation.stop()
+        self.hide()
+
+    def settle_motion(self):
+        self.animation.stop()
+        self._set_opacity(1.0)
 
 
 class _SourceTabBar(QTabBar):
@@ -31,43 +84,52 @@ class _SourceTabBar(QTabBar):
         self.indicator.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.indicator.hide()
         self.indicator_animation = QPropertyAnimation(self.indicator, b'geometry', self)
-        self.indicator_animation.setDuration(160)
+        self.indicator_animation.setDuration(duration('data_tab'))
         self.indicator_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.currentChanged.connect(self._current_tab_changed)
-        self.tabMoved.connect(lambda *_args: self.sync_indicator(animate=False))
-
-    def _current_tab_changed(self, index):
-        self._sync_close_visibility()
-        self.sync_indicator(index)
+        self.tabMoved.connect(lambda *_args: self.settle_motion())
 
     def set_indicator_color(self, value):
         self.indicator.setStyleSheet(f'background:{value};')
 
-    def sync_indicator(self, index=None, *, animate=True):
-        index = self.currentIndex() if index is None else index
+    def sync_indicator(self, *, animate=False):
+        index = self.currentIndex()
         rect = self.tabRect(index) if index >= 0 else QRect()
-        self.indicator_animation.stop()
+        animation = self.indicator_animation
         if not rect.isValid():
+            animation.stop()
             self.indicator.hide()
             return
         target = QRect(rect.left(), rect.bottom() - 1, rect.width(), 2)
-        if (not animate or self.indicator.isHidden()
-                or not motion.animations_enabled() or not self.isVisible()):
-            self.indicator.setGeometry(target)
-            self.indicator.show()
-            self.indicator.raise_()
-            return
-        self.indicator_animation.setStartValue(self.indicator.geometry())
-        self.indicator_animation.setEndValue(target)
-        self.indicator_animation.start()
+        if self.indicator.isVisible() and motion.animations_enabled():
+            # Catalog refreshes can arrive while the selected source is loading.
+            if animation.state() == QAbstractAnimation.State.Running and animation.endValue() == target:
+                return
+            if animate and self.indicator.geometry() != target:
+                animation.stop()
+                animation.setStartValue(self.indicator.geometry())
+                animation.setEndValue(target)
+                animation.start()
+                return
+        animation.stop()
+        self.indicator.setGeometry(target)
+        self.indicator.show()
+        self.indicator.raise_()
+
+    def settle_motion(self):
+        self.indicator_animation.stop()
+        self.sync_indicator()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.sync_indicator(animate=False)
+        self.settle_motion()
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.sync_indicator(animate=False)
+        self.settle_motion()
+
+    def hideEvent(self, event):
+        self.indicator_animation.stop()
+        super().hideEvent(event)
 
     def sync_close_button(self, index, key, title):
         side = QTabBar.ButtonPosition.RightSide

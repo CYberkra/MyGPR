@@ -30,6 +30,7 @@ from qfluentwidgets import (CaptionLabel, FluentIcon as FIF,
                             PrimaryPushButton, PushButton, RoundMenu, ToolButton)
 
 from ui import constants, motion
+from ui.design_tokens import duration
 from ui.widgets.context_menus import add_action, make_menu, show_menu
 from ui.widgets.object_context_menu import ObjectMenuBinding, object_action
 
@@ -454,7 +455,7 @@ class ChainStrip(QWidget):
         self._pill.hide()
         self._pill_anim = QPropertyAnimation(self._pill, b'geometry')
         self.destroyed.connect(self._pill_anim.stop)
-        self._pill_anim.setDuration(180)
+        self._pill_anim.setDuration(duration('selection'))
         self._pill_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
     def _move_pill(self, row: int) -> None:
@@ -476,6 +477,14 @@ class ChainStrip(QWidget):
         self._pill_anim.setStartValue(self._pill.geometry())
         self._pill_anim.setEndValue(rect)
         self._pill_anim.start()
+
+    def settle_motion(self) -> None:
+        target = self._pill_anim.endValue()
+        if target is not None and not self._pill.isHidden():
+            self._pill_anim.stop()
+            item = self._list.currentItem()
+            if item is not None:
+                self._pill.setGeometry(self._list.visualItemRect(item))
 
     # ------------------------------------------------ 运行钮：取消就近翻转
     def _style_overflow_btn(self) -> None:

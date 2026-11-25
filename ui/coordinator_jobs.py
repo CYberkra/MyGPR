@@ -12,12 +12,16 @@ class JobHub:
 
     def __init__(self, coordinator) -> None:
         self._co = coordinator
-        self.known_job_ids: set[str] = set()   # 已 upsert 到任务控件的任务
+        # Keep the session's observed IDs and their actual states together. A
+        # pruned row can still have a queued completion callback to classify.
+        self._statuses: dict[str, str] = {}
         self.import_job_ids: set[str] = set()  # 测线导入/传感器同步任务（完成后刷新测线）
         self.import_forms: dict[str, str] = {}
         self.spatial_job_ids: set[str] = set()  # 空间成果任务（完成后刷新空间成果表）
-        self._terminal_statuses: dict[str, str] = {}
-        self._progress_counts: dict[str, tuple[int, int]] = {}
+        self._cancel_pending: set[str] = set()
+        self._scoped_failures: set[str] = set()
+        # Pop the final counts exactly once, when job_completed delivers the result.
+        self._active_progress: dict[str, tuple[int, int]] = {}
         self._contexts = {}
         self._actions = {}
 
@@ -35,10 +39,22 @@ class JobHub:
     def register_processing(self, job_id, context):
         self._contexts[str(job_id)] = deepcopy(context)
 
+    def register_scoped_failure(self, job_id: str) -> None:
+        """This job has a domain callback responsible for its failure notice."""
+        self._scoped_failures.add(str(job_id))
+
+    @property
+    def known_job_ids(self) -> set[str]:
+        return set(self._statuses)
+
+    def terminal_status(self, job_id: str) -> str:
+        status = self._statuses.get(str(job_id), '')
+        return status if status in ('completed', 'failed', 'cancelled') else ''
+
     def record_submission_failure(self, context, message):
         job_id = uuid4().hex
         self.register_processing(job_id, context)
-        self.known_job_ids.add(job_id)
+        self._statuses[job_id] = 'failed'
         for view in self._views():
             view.upsert_job(job_id, self._job_title(job_id, f'处理流水线 {context["line_id"]}'))
             view.update_progress(job_id, 0, 0, str(message))
@@ -54,9 +70,10 @@ class JobHub:
                 view.add_batch(uuid4().hex, job_ids)
 
     def _upsert(self, job_id: str) -> None:
-        if job_id in self.known_job_ids:
+        if job_id in self._statuses:
             return
-        self.known_job_ids.add(job_id)
+        self._statuses[job_id] = 'queued'
+        self._active_progress[job_id] = (0, 0)
         self._contexts.setdefault(job_id, {'project_id': str(self._co.current_project_id() or '')})
         title = job_id
         bridge = self._co.job_bridge()
@@ -78,17 +95,22 @@ class JobHub:
     # ============================================================ 任务事件
     def on_status(self, job_id: str, status: str) -> None:
         job_id = str(job_id)
+        if self.terminal_status(job_id):
+            return
         self._upsert(job_id)
+        self._statuses[job_id] = str(status)
         for view in self._views():
             view.set_status(job_id, str(status))
-        if str(status) in ('completed', 'failed', 'cancelled'):
-            self._terminal_statuses[job_id] = str(status)
+        if self.terminal_status(job_id):
+            self._cancel_pending.discard(job_id)
 
     def on_progress(self, job_id: str, completed: int, total: int,
                     message: str) -> None:
         job_id = str(job_id)
+        if self.terminal_status(job_id):
+            return
         self._upsert(job_id)
-        self._progress_counts[job_id] = (int(completed), int(total))
+        self._active_progress[job_id] = (int(completed), int(total))
         for view in self._views():
             view.update_progress(job_id, int(completed), int(total), str(message))
         if job_id == self._co.processing.processing_job_id:
@@ -101,7 +123,9 @@ class JobHub:
         message = str(payload.get('message') or payload.get('code') or '处理提示')
         level = 'INFO' if payload.get('level') == 'info' else 'WARNING'
         self._co.log_message(f'{level} 任务 {str(job_id)[:8]}… {message}')
-        completed, total = self._progress_counts.get(job_id, (0, 0))
+        if self.terminal_status(job_id):
+            return
+        completed, total = self._active_progress[job_id]
         for view in self._views():
             view.update_progress(job_id, completed, total, message)
 
@@ -110,7 +134,13 @@ class JobHub:
         co = self._co
         job_id = str(job_id)
         self._upsert(job_id)
-        cancelled = self._terminal_statuses.pop(job_id, '') == 'cancelled'
+        counts = self._active_progress.pop(job_id, None)
+        if counts is None:
+            return
+        status = self.terminal_status(job_id) or ('completed' if success else 'failed')
+        self._statuses[job_id] = status
+        self._cancel_pending.discard(job_id)
+        cancelled = status == 'cancelled'
         if success:
             co.log_message(
                 f'SUCCESS 任务 {job_id[:8]}… 完成：{message}')
@@ -120,11 +150,11 @@ class JobHub:
             co.log_message(
                 f'WARNING 任务 {job_id[:8]}… 结束：{message}')
             # P0-1：失败必须显式反馈；处理任务由 run_finished 单独弹窗，避免重复
-            if job_id != co.processing.processing_job_id:
+            if job_id != co.processing.processing_job_id and job_id not in self._scoped_failures:
                 co.infobar('error', '任务失败',
                            message or '任务执行失败，详见底部任务面板', duration=8000)
-        status = 'cancelled' if cancelled else 'completed' if success else 'failed'
-        completed, total = self._progress_counts.pop(job_id, (0, 0))
+        self._scoped_failures.discard(job_id)
+        completed, total = counts
         for view in self._views():
             view.update_progress(job_id, completed, total, str(message))
             view.set_status(job_id, status)
@@ -211,13 +241,23 @@ class JobHub:
 
     # ============================================================ 取消 / 清理
     def on_cancel(self, job_id: str) -> None:
+        job_id = str(job_id)
+        if not job_id or job_id in self._cancel_pending or self.terminal_status(job_id):
+            return
         bridge = self._co.job_bridge()
-        if bridge is not None:
-            job_id = str(job_id)
-            if job_id and job_id == self._co.processing.processing_job_id:
-                self._co.processing.processing_cancel_requested = True
-            bridge.cancel(job_id)
-            self._co.log_message(f'INFO 已请求取消任务 {job_id[:8]}…')
+        if bridge is None:
+            return
+        self._cancel_pending.add(job_id)
+        if bridge.cancel(job_id) is False or self.terminal_status(job_id):
+            self._cancel_pending.discard(job_id)
+            return
+        self._upsert(job_id)
+        for view in self._views():
+            view.set_cancel_pending(job_id)
+        if job_id == self._co.processing.processing_job_id:
+            self._co.processing.processing_cancel_requested = True
+            self._co.page('processingInterface').set_cancel_pending(job_id)
+        self._co.log_message(f'INFO 已请求取消任务 {job_id[:8]}…')
 
     def on_prune_jobs(self) -> None:
         """清理已完成任务：BackendController.prune_jobs（工作线程，不阻塞 UI）。"""

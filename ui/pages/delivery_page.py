@@ -12,12 +12,13 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, CheckBox, ComboBox, InfoBar, InfoBarPosition, LineEdit,
+    CaptionLabel, CheckBox, ComboBox, InfoBarPosition, LineEdit,
     MessageBox, PrimaryPushButton, PushButton, ScrollArea, SpinBox,
 )
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants, file_dialogs
+from ui.widgets.info_bar import InfoBar
 from ui.page_scaffold import (make_card, make_form_row, make_hint,
                               rebuild_check_list, style_transparent_scroll,
                               wrap_centered)

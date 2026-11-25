@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip('PyQt6')
 from PyQt6.QtCore import QCoreApplication, QEvent, QVariantAnimation, Qt
-from PyQt6.QtWidgets import QLabel, QProgressBar
+from PyQt6.QtWidgets import QProgressBar
 from qfluentwidgets import ProgressBar
 
 from ui import motion
@@ -56,35 +56,6 @@ def test_immediate_progress_update_cancels_old_animation(qapp, monkeypatch, imme
     bar.deleteLater()
 
 
-@pytest.mark.parametrize('immediate', ['same_color', 'reduced_motion'])
-def test_immediate_badge_update_cancels_old_animation(qapp, monkeypatch, immediate):
-    badge = QLabel()
-    template = 'background-color:%s;'
-    monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
-    motion.animate_badge_color(badge, template, '#000000', '#ffffff')
-    animation = badge._motion_color_anim
-    animation.setCurrentTime(70)
-    if immediate == 'reduced_motion':
-        monkeypatch.setattr(motion, 'animations_enabled', lambda: False)
-    motion.animate_badge_color(badge, template,
-                              '#112233' if immediate == 'same_color' else '#000000', '#112233')
-    assert animation.state() is QVariantAnimation.State.Stopped
-    assert badge.styleSheet() == template % '#112233'
-    badge.deleteLater()
-
-
-def test_badge_reuses_one_animation_across_status_updates(qapp, monkeypatch):
-    badge = QLabel()
-    monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
-    for index in range(12):
-        motion.animate_badge_color(badge, 'background-color:%s;', '#000000',
-                                  '#ffffff' if index % 2 else '#112233')
-    assert len(badge.findChildren(QVariantAnimation)) == 1
-    badge._motion_color_anim.setCurrentTime(motion.DEFAULT_DURATION_MS)
-    assert badge.styleSheet() == 'background-color:#ffffff;'
-    badge.deleteLater()
-
-
 def test_fluent_progress_has_one_animation_owner(qapp, monkeypatch):
     bar = ProgressBar()
     bar.setRange(0, 100)
@@ -109,17 +80,27 @@ def test_fluent_progress_reduced_motion_updates_rendered_value_immediately(qapp,
     bar.deleteLater()
 
 
-def test_badge_theme_refresh_interrupts_previous_status_color(qapp, monkeypatch):
-    from ui.widgets import job_widgets
-    badge = QLabel()
-    monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
-    motion.animate_badge_color(badge, job_widgets.BADGE_QSS, '#000000', '#ffffff')
-    animation = badge._motion_color_anim
-    monkeypatch.setattr(job_widgets, '_status_badge_color', lambda _status: '#123456')
-    job_widgets._restyle_status_badge(badge, 'running')
-    assert animation.state() is QVariantAnimation.State.Stopped
-    assert badge.styleSheet() == job_widgets.BADGE_QSS % '#123456'
-    badge.deleteLater()
+def test_job_badges_switch_both_colors_immediately_in_each_theme(qapp, monkeypatch):
+    import re
+
+    from tests.test_design_tokens import _contrast
+    from ui import theme_helpers
+    from ui.widgets.job_widgets import JobTable
+
+    table = JobTable()
+    table.upsert_job('J', '测试任务')
+    badge = table._badges['J']
+    for dark in (False, True):
+        monkeypatch.setattr(theme_helpers, 'isDarkTheme', lambda: dark)
+        for status, label in [('queued', '排队'), ('running', '运行中'), ('completed', '已完成'),
+                              ('failed', '失败'), ('cancelled', '已取消')]:
+            table.set_status('J', status)
+            table.apply_theme(dark)
+            text, background = re.findall(r'(?:^|[ ;])(?:background-)?color:\s*(#[\da-fA-F]{6})', badge.styleSheet())
+            assert _contrast(text, background) >= 4.5, (dark, status)
+            assert badge.text() == label
+            assert not badge.findChildren(QVariantAnimation)
+    table.deleteLater()
 
 
 @pytest.mark.parametrize('reduced', [False, True])
@@ -178,7 +159,7 @@ def test_animated_widgets_delete_with_gc_and_exit_normally(tmp_path):
     code = '''
 import atexit, gc
 from PyQt6.QtCore import QCoreApplication, QEvent, QObject, QTimer, pyqtSlot
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QProgressBar
+from PyQt6.QtWidgets import QApplication, QWidget, QProgressBar
 from qfluentwidgets import ProgressBar
 from ui import motion
 atexit.register(lambda: print("motion-lifetime-atexit", flush=True))
@@ -197,15 +178,12 @@ class Observer(QObject):
         self.destroyed_count += 1
 observer = Observer()
 for parent in (host, None):
-    for kind in ("plain", "fluent", "badge"):
-        widget = QLabel(parent) if kind == "badge" else ProgressBar(parent) if kind == "fluent" else QProgressBar(parent)
+    for kind in (QProgressBar, ProgressBar):
+        widget = kind(parent)
         widget.destroyed.connect(observer.on_destroyed)
-        if kind == "badge":
-            motion.animate_badge_color(widget, "background-color:%s;", "#000000", "#ffffff")
-        else:
-            widget.setRange(0, 100)
-            widget.setValue(0)
-            motion.animate_progress(widget, 100)
+        widget.setRange(0, 100)
+        widget.setValue(0)
+        motion.animate_progress(widget, 100)
         if parent is None:
             orphans.append(widget)
 del widget
@@ -220,7 +198,7 @@ def dispose():
 QTimer.singleShot(20, dispose)
 QTimer.singleShot(300, app.quit)
 status = app.exec()
-assert observer.destroyed_count == 6, observer.destroyed_count
+assert observer.destroyed_count == 4, observer.destroyed_count
 print("motion-lifetime-return", status, flush=True)
 raise SystemExit(status)
 '''

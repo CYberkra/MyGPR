@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # 全量默认键（MyGPR 版）
 DEFAULT_SETTINGS = {
     'theme': constants.THEME_LIGHT,                     # '浅色主题' / '深色主题'
+    'motion_preference': 'system',
     'default_dielectric': constants.DEFAULT_DIELECTRIC,  # 9.0（导入表单默认值）
     'max_workers': constants.MAX_WORKERS,                # 2（后端并行线程数，重启生效）
     'project_root': constants.DEFAULT_PROJECT_ROOT,      # ~/Documents/MyGPRProjects
@@ -85,6 +86,7 @@ _NUMBER_RANGES = {
 _CHOICES = {
     'update_channel': ('stable', 'preview'),
     'theme': (constants.THEME_LIGHT, constants.THEME_DARK),
+    'motion_preference': ('system', 'reduce'),
     'output_panel_active_tab': ('log', 'jobs'),
     'bscan_aspect_mode': ('free', 'square', 'cell'),
     'bscan_x_axis': ('trace', 'distance'), 'bscan_y_axis': ('sample', 'elevation'),

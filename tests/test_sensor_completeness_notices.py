@@ -103,6 +103,8 @@ def test_bridge_delivers_warning_before_success_and_reports_skipped_steps(qapp):
     runner.wait(job, timeout=3)
     bridge = JobBridge(NS(jobs=runner))
     events = []
+    statuses = []
+    bridge.status_changed.connect(lambda jid, state: statuses.append(state))
     bridge.notice_received.connect(lambda jid, payload: events.append(('notice', payload['message'])))
     bridge.job_completed.connect(lambda jid, ok, text, result: events.append(('done', ok, text)))
     try:
@@ -113,10 +115,38 @@ def test_bridge_delivers_warning_before_success_and_reports_skipped_steps(qapp):
                 break
         assert events[0][0] == 'notice'
         assert events[-1][0] == 'done' and events[-1][1] is True
+        assert statuses == ['completed']
         assert '1步已跳过' in events[-1][2]
     finally:
         bridge.shutdown()
         runner.shutdown()
+
+
+def test_bridge_recovers_terminal_status_before_delivering_a_completion(qapp):
+    from PyQt6.QtTest import QSignalSpy
+    from mygpr.application.jobs.models import JobStatus
+    from ui.controllers.backend_controller import JobBridge
+
+    snapshots = iter((NS(status=JobStatus.RUNNING), NS(status=JobStatus.CANCELLED, message='已取消')))
+
+    def missing_events(*_args, **_kwargs):
+        raise KeyError('history no longer available')
+
+    jobs = NS(snapshot=lambda _job_id: next(snapshots),
+              events=missing_events, forget=lambda _job_id: None)
+    bridge = JobBridge(NS(jobs=jobs))
+    seen = []
+    bridge.status_changed.connect(lambda _jid, status: seen.append(status))
+    bridge.job_completed.connect(lambda _jid, ok, message, _result: seen.append((ok, message)))
+    completed = QSignalSpy(bridge.job_completed)
+    try:
+        bridge.watch('J')
+        if not completed:
+            assert completed.wait(3000)
+        qapp.processEvents()
+        assert seen == ['running', 'cancelled', (False, '已取消')]
+    finally:
+        bridge.shutdown()
 
 
 def test_task_message_shows_skip_and_final_summary_without_resetting_progress():

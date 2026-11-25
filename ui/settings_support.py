@@ -26,13 +26,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from qfluentwidgets import PushButton
 
-from ui.constants import LOG_DIR
+from ui.constants import LOG_DIR, THEME_DARK, THEME_LIGHT
 from ui.desktop_backend_facade import get_tile_cache_dir
 from ui.page_scaffold import PanelStateMixin
 from ui.settings_manager import DEFAULT_SETTINGS, SettingsManager
 from ui.widgets.bscan_fullscreen import FullscreenHost
-from ui.widgets.settings_controls import SettingsDisclosure
+from ui.widgets.settings_controls import SettingsChoice, SettingsDisclosure
 
 
 SETTINGS_CATEGORIES = {
@@ -46,6 +47,7 @@ SETTINGS_CATEGORIES = {
 _DEFERRED_SEARCH = {
     'appearance': (
         ('主题', '浅色 深色 外观 颜色'),
+        ('动态效果', '动画 动效 无障碍 跟随系统 减少动态效果'),
         ('恢复面板布局', '还原 默认 文件树 边栏 侧栏 窗口'),
         ('查看快捷键', 'F1 键盘'),
     ),
@@ -84,6 +86,40 @@ def finite_setting_value(value, default: float) -> float:
     except (TypeError, ValueError, OverflowError):
         return default
     return number if math.isfinite(number) else default
+
+
+class SettingsAppearanceMixin:
+    def _build_appearance(self, key: str) -> None:
+        layout = self._category(key)
+        self._theme_combo = SettingsChoice((
+            ('浅色', THEME_LIGHT, 'settingsThemeLight'),
+            ('深色', THEME_DARK, 'settingsThemeDark'),
+        ))
+        self._theme_combo.setObjectName('settingsTheme')
+        self._theme_combo.setAccessibleName('主题')
+        self._theme_combo.setCurrentText(self._theme_text)
+        self._theme_combo.currentTextChanged.connect(self._request_theme)
+        self._row(layout, '主题', self._theme_combo)
+        self._motion_choice = SettingsChoice((
+            ('跟随系统', 'system', 'settingsMotionSystem'),
+            ('减少动态效果', 'reduce', 'settingsMotionReduced'),
+        ))
+        self._motion_choice.setObjectName('settingsMotionPreference')
+        self._motion_choice.setAccessibleName('动态效果')
+        self._motion_choice.setCurrentText(self._motion_preference)
+        self._motion_choice.currentTextChanged.connect(self._request_motion_preference)
+        self._row(layout, '动态效果', self._motion_choice)
+        reset = PushButton('恢复面板布局…')
+        reset.clicked.connect(self._confirm_layout_reset)
+        self._row(layout, '面板布局', reset, hint='恢复侧栏、任务区和全屏图窗的位置或显示状态。')
+        shortcuts = PushButton('查看快捷键')
+        shortcuts.clicked.connect(self.shortcuts_requested)
+        self._row(layout, '快捷键', shortcuts, hint='按操作或按键查找。')
+        self._target(key, '主题', self._theme_combo)
+        self._target(key, '动态效果', self._motion_choice, '动画 动效 无障碍 跟随系统 减少动态效果')
+        self._target(key, '恢复面板布局', reset)
+        self._target(key, '查看快捷键', shortcuts)
+        layout.addStretch()
 
 
 def deferred_setting_targets() -> dict[tuple[str, str], SettingTarget]:

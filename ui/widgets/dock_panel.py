@@ -26,6 +26,7 @@ from qfluentwidgets import TransparentToolButton
 from qfluentwidgets import FluentIcon as FIF
 
 from ui import constants
+from ui.design_tokens import duration
 from ui.motion import animations_enabled
 from ui.theme_helpers import accent_color, font_families_qss
 
@@ -235,6 +236,11 @@ class DockPanel(QWidget):
             anim.stop()
         anim.setStartValue(int(start_w))
         anim.setEndValue(int(target_w))
-        anim.setDuration(constants.PANEL_ANIM_DURATION_MS)
+        anim.setDuration(duration('fold'))
         anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         anim.start()
+
+    def settle_motion(self) -> None:
+        if self._width_anim is not None:
+            self._width_anim.stop()
+            self.setFixedWidth(constants.DOCK_COLLAPSED_WIDTH if self._collapsed else self._expanded_width)

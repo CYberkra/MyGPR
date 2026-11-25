@@ -16,12 +16,12 @@ from qfluentwidgets import (
 )
 from qfluentwidgets import FluentIcon as FIF
 
-from ui import constants, design_tokens
+from ui import constants, design_tokens, motion
 from ui.file_tree import artifact_parameters, artifact_direct_parent, artifact_step
 from ui.file_tree import build_lineage_model as build_lineage_model  # explicit re-export
-from ui.motion import animate_progress, animations_enabled
 from ui.page_scaffold import make_form_row, refill_combo
 from ui.widgets import PipelineList, clear_invalid
+from ui.widgets.job_widgets import progress_caption, set_job_progress
 from ui.widgets.bscan_workspace import BScanWorkspace
 from ui.widgets.collapsible_card import make_collapsible_card
 from ui.widgets.object_context_menu import ObjectMenuBinding
@@ -68,6 +68,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._draft_edit_epoch = 0
         self._project_read_only = False
         self._running, self._autotune_running = False, False
+        self._cancel_pending = False
         self._run_snapshot, self._completion_pending = None, None
         self._completed_artifact = ''
         self._activation_epoch, self._suspend, self._raw_opened = 0, False, False
@@ -78,8 +79,12 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._autotune_result = None
         self._autotune_pending_request = None
         self._sm, self._job_id, self._pending_layout = None, '', None
-        self._tools_width_animation = None
         self._tools_expanded_width = 300
+        self._tools_width_animation = QVariantAnimation(self)
+        self._tools_width_animation.setDuration(design_tokens.duration('tool_panel'))
+        self._tools_width_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._tools_width_animation.valueChanged.connect(self._set_tools_width)
+        self._tools_width_animation.finished.connect(self._finish_tools_width)
         self._build_ui()
         self._comparison = LineComparison(self)
         self._connect_internal()
@@ -375,7 +380,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._batch_btn.setEnabled(valid and not self._running and len(self._lines) > 0)
         self._estimate_btn.setEnabled(valid and not self._running)
         self._save_intermediates_check.setEnabled(not self._running and not self._project_read_only)
-        self._run_btn.setText('运行中…' if self._running else '运行处理')
+        self._run_btn.setText('运行中…' if self._running and not self._cancel_pending else '运行处理')
         self._run_btn.setToolTip('项目只读，无法提交处理任务' if self._project_read_only else
             ('输入读取失败，请重试预览：' + error) if error else
             '请选择处理输入并添加步骤' if not valid else '运行处理（Ctrl+R）')
@@ -384,7 +389,8 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._draft_revision_hint.setText('数据已更新，请重新添加处理步骤' if stale else '')
         self._draft_revision_hint.setVisible(stale)
         self._cancel_btn.setVisible(self._running)
-        self._cancel_btn.setEnabled(self._running)
+        self._cancel_btn.setText('正在取消…' if self._cancel_pending else '取消任务')
+        self._cancel_btn.setEnabled(self._running and not self._cancel_pending)
         for widget in (self._pipeline_list, self._result_name_edit):
             widget.setEnabled(self._can_edit_chain())
         self._sync_step_tools()
@@ -616,14 +622,18 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
 
     def set_running(self, running, job_id='', success=None):
         running = bool(running)
-        if running and not self._running:
+        new_job = running and (not self._running or self._job_id != str(job_id or ''))
+        if new_job or not running:
+            self._cancel_pending = False
+            set_job_progress(self._progress_bar, 0, 0)
+        if new_job:
             self._stash_draft()
             self._run_snapshot = {'key': self._draft_key(), 'input_artifact_id': self._input_artifact_id(),
                 'pipeline': deepcopy(self.current_pipeline()), 'epoch': self._activation_epoch,
                 'artifacts': set(self._artifacts_by_id), 'activate': True}
             self._close_gain_previews()
-            self._progress_bar.setValue(0)
             self._progress_label.setText('输入：' + self._input_label.text().removeprefix('输入：'))
+            self._progress_label.setToolTip('')
         elif not running and self._running and self._run_snapshot:
             if success:
                 snap = self._run_snapshot
@@ -640,6 +650,11 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         self._refresh_ui()
         self._save_session()
 
+    def set_cancel_pending(self, job_id):
+        if self._running and self._job_id == str(job_id):
+            self._cancel_pending = True
+            self._refresh_ui()
+
     def set_run_result(self, job_id, artifact_id):
         """Use the job's actual output identity, rather than a newest-result guess."""
         if self._run_snapshot is not None and str(job_id) == self._job_id:
@@ -648,11 +663,7 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
     def hideEvent(self, event):
         if self._run_snapshot:
             self._run_snapshot['activate'] = False
-        if self._tools_width_animation is not None:
-            self._tools_width_animation.stop()
-            self._tools_width_animation.deleteLater()
-            self._tools_width_animation = None
-            self._finish_tools_width(self._tools_btn.isChecked(), max(1, sum(self._body.sizes())))
+        self.settle_motion()
         super().hideEvent(event)
 
     def _on_run_clicked(self):
@@ -827,50 +838,42 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
         visible = bool(visible)
         if visible and self._resources_btn.isChecked():
             self._resources_btn.setChecked(False)
-        if self._tools_width_animation is not None:
-            self._tools_width_animation.stop()
-            self._tools_width_animation.deleteLater()
-            self._tools_width_animation = None
-        sizes = self._body.sizes()
-        total = max(1, sum(sizes))
-        current = self._tools_panel.width() if self._tools_panel.isVisible() else 0
-        if visible:
-            target = self._tools_expanded_width
-            self._tools_panel.setMinimumWidth(0)
-            self._tools_panel.setMaximumWidth(16777215)
-            self._tools_panel.show()
-        else:
-            if current > 0:
-                self._tools_expanded_width = current
-            target = 0
-            self._tools_panel.setMinimumWidth(0)
-            self._tools_panel.setMaximumWidth(16777215)
-        if not animations_enabled() or not self.isVisible() or current == target:
-            self._set_tools_width(target, total)
-            self._finish_tools_width(visible, total)
+        animation = self._tools_width_animation
+        current = self._tools_panel.width() if not self._tools_panel.isHidden() else 0
+        if (not visible and self.isVisible() and current > 0
+                and animation.state() == QVariantAnimation.State.Stopped):
+            self._tools_expanded_width = current
+        animation.stop()
+        target = self._tools_expanded_width if visible else 0
+        if not motion.animations_enabled() or not self.isVisible() or current == target:
+            self._finish_tools_width()
             return
-        animation = QVariantAnimation(self)
-        animation.setDuration(180)
-        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animation.setStartValue(int(current))
-        animation.setEndValue(int(target))
-        animation.valueChanged.connect(lambda value: self._set_tools_width(int(value), total))
-        animation.finished.connect(lambda: self._finish_tools_width(visible, total))
-        self._tools_width_animation = animation
+        self._tools_panel.setFixedWidth(current)
+        self._tools_panel.show()
+        animation.setStartValue(current)
+        animation.setEndValue(target)
         animation.start()
 
-    def _set_tools_width(self, width, total):
-        width = max(0, int(width))
-        self._body.setSizes([width, max(1, total - width)])
+    def _set_tools_width(self, width):
+        # Fix only the tools column. The splitter allocates the current window's
+        # remaining width to the canvas, even when resized mid-transition.
+        self._tools_panel.setFixedWidth(int(width))
 
-    def _finish_tools_width(self, visible, total):
+    def _finish_tools_width(self):
+        visible = self._tools_btn.isChecked()
         self._tools_panel.setVisible(visible)
         self._tools_panel.setMinimumWidth(250)
         self._tools_panel.setMaximumWidth(360)
-        self._set_tools_width(self._tools_expanded_width if visible else 0, total)
-        if self._tools_width_animation is not None:
-            self._tools_width_animation.deleteLater()
-            self._tools_width_animation = None
+        if visible:
+            width = self._tools_expanded_width
+            canvas = self._body.contentsRect().width() - self._body.handleWidth() - width
+            self._body.setSizes([width, max(1, canvas)])
+
+    def settle_motion(self):
+        animation = self._tools_width_animation
+        if animation.state() == QVariantAnimation.State.Running:
+            animation.stop()
+            self._finish_tools_width()
 
     def _toggle_resources(self, visible):
         if visible:
@@ -934,16 +937,11 @@ class ProcessingPage(ProcessingGainPreview, ProcessingChainView, ProcessingSteps
 
 
     def set_progress(self, completed: int, total: int, message: str) -> None:
-        """进度更新：total>0 按比例，否则按百分数；message 显示在进度条右侧。"""
-        if total and total > 0:
-            self._progress_bar.setRange(0, int(total))
-            animate_progress(self._progress_bar,
-                             min(int(completed), int(total)))
-        else:
-            self._progress_bar.setRange(0, 100)
-            animate_progress(self._progress_bar,
-                             max(0, min(int(completed), 100)))
-        self._progress_label.setText(str(message or ''))
+        """只有运行中的当前作业才更新绘制值；阶段消息不需要伪造总量。"""
+        if not self._running:
+            return
+        set_job_progress(self._progress_bar, completed, total)
+        self._progress_label.setText(progress_caption(completed, total, message))
         self._progress_label.setToolTip(str(message or ''))
 
     def set_lines(self, lines: list) -> None:

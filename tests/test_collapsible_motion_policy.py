@@ -73,6 +73,42 @@ def test_dock_reuses_width_animation_across_quick_reversals(qapp, monkeypatch):
     widget.deleteLater()
 
 
+def test_processing_tools_retain_user_width_through_reversal_resize_and_hide(qapp, monkeypatch):
+    from ui.pages.processing_page import ProcessingPage
+
+    monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
+    page = ProcessingPage()
+    page.resize(1500, 850)
+    page.show()
+    qapp.processEvents()
+    body, tools, toggle = page._body, page._tools_panel, page._tools_btn
+    body.setSizes([325, sum(body.sizes()) - 325])
+    saved = tools.width()
+    animation = page._tools_width_animation
+    toggle.setChecked(False)
+    animation.setCurrentTime(65)
+    first_frame = tools.width()
+    assert 0 < first_frame < saved
+    toggle.setChecked(True)
+    assert animation.startValue() == first_frame
+    animation.setCurrentTime(40)
+    toggle.setChecked(False)
+    animation.setCurrentTime(20)
+    page.hide()
+    assert tools.isHidden() and animation.state() == QAbstractAnimation.State.Stopped
+    page.show()
+    toggle.setChecked(True)
+    animation.setCurrentTime(55)
+    page.resize(1700, 850)
+    page.settle_motion()
+    qapp.processEvents()
+    assert tools.width() == saved
+    assert tools.minimumWidth() == 250 and tools.maximumWidth() == 360
+    assert sum(body.sizes()) + body.handleWidth() == body.contentsRect().width()
+    page.close()
+    page.deleteLater()
+
+
 def test_card_animates_visible_body_from_actual_height(qapp, monkeypatch):
     monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
     host = QWidget()
