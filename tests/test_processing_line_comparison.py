@@ -54,6 +54,8 @@ def requests(page):
 
 
 def drop(page, line='L02', edge='right', group_id=None):
+    # A preceding drop can queue the new split group's show and layout events.
+    QApplication.processEvents()
     manager = comparison(page)
     group = page._workspace.group_widget(group_id)
     target = group.view._glw.viewport()
@@ -62,6 +64,7 @@ def drop(page, line='L02', edge='right', group_id=None):
     mime = manager.mime_for_line(line)
     entered = QDragEnterEvent(point, Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(target, entered)
+    assert entered.isAccepted()
     assert group.hint.isVisible() and manager.label(line) in group.hint.text()
     event = QDropEvent(QPointF(point), Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     QApplication.sendEvent(target, event)

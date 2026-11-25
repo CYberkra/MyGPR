@@ -45,4 +45,21 @@
 - 全屏期间在同一物理屏中平移主窗 24 逻辑像素。Esc 回到移动后的原分组和布局位置，轴范围、色阶和对比组视口保持一致。
 - 向任务协调器交付受控事件，核对未知总量、失败后启动新作业、迟到的旧进度和 AutoTune 失败提示去重。此前的实测作业继续覆盖真实后台取消。
 
-独立工作树通过锁定版本 Ruff、Python 编译、架构、复杂度和技术债预算检查。GitHub Actions 待验收分支取得写入权限后运行。原生探针、JSON 与截图保存在本机 `output/motion-acceptance-20261125/`，其中 `compare-baseline-150` 与 `compare-ci-150` 记录本表的同环境对照。
+## 大文件补充验收
+
+两次均从 Windows 原生入口启动，使用 150% 缩放和隔离项目。导入提交给真实后台任务，并在任务完成后核验项目内 HDF5。验收提交为 `888268e`，两次正常退出，输入文件 SHA-256 均保持一致。
+
+| 输入 | 导入 | B-scan 和退出 |
+| --- | --- | --- |
+| **Perito Moreno 第一航次实测**，6,400 × 43,228、float32、1,106,636,800 矩阵字节（1.03 GiB） | 16.67 s | 全分辨率缓存 23.02 s 就绪。局部位图中抽查 18 个颜色像元，全部与标准栅格对应。道号／样点 (32769, 1200) 和 (43212, 1200) 与输入坐标、幅值一致，绘图区可实际拖动。进程峰值工作集 5.97 GiB，切回 L09 后正常预览，关闭后临时 B-scan 缓存为 0。 |
+| **营山 L09 重复道容量样本**，501 × 1,072,122、float32、2,148,532,488 矩阵字节（2.00 GiB） | 51.02 s | 默认预算约 29.89 GiB，低于预览估算的 64.03 GiB。工作区显示全分辨率内存保护提示，无预览矩阵。随后打开原营山 L09、关闭项目和正常退出均通过。 |
+
+实测来源为 Koch 等人的公开 [冰川 GPR 数据](https://doi.org/10.5281/zenodo.21099957)，只读取 `06_GPR_unprocessed_sgy.zip` 的 `PeritoMoreno_1.SGY` 成员。原文件 1,117,015,120 字节，归档 CRC32 为 `ff83c992`。离线将 IBM 浮点转换成可导入 NPY，276,659,200 个值经过精确转换与全量回读核对。测试使用道号和样点索引。仅该验收进程将现有 `MYGPR_PROCESSING_MEMORY_FRACTION` 设为 0.90。源和 NPY 的 SHA-256 及幅值校验见本机 `public-field-capacity/provenance.json`。
+
+容量样本每道映射回 L09 的 `j % 2378`，用来检查多 GiB 导入和资源保护。大文件的两份原生报告在 `native-capacity-perito-real/report.json` 和 `native-capacity-2gib-default-r2/report.json`。计时为本机单次观测。
+
+## CI 补验
+
+初次 [MyGPR CI](https://github.com/CYberkra/MyGPR/actions/runs/45555274375) 对应 `888268e77485180483b28e4c623b7680caa864b5`。后端、Python 3.12 后端矩阵和干净安装通过，Windows 与 Linux GUI 都在同一测线对比回归首次中止。Windows 实窗复现显示，前一次 Drop 创建的分组尚在等待 Qt 显示与布局事件，第二次合成 DragEnter 已提前送到不可见视口。补验开始前让 Qt 处理这批事件，并继续断言落区提示可见、包含对应测线名称、Drop 后即时清除。
+
+原生探针、JSON 与截图保存在本机 `output/motion-acceptance-20261125/`，其中 `compare-baseline-150` 与 `compare-ci-150` 记录基础前后对照。独立工作树已通过锁定版本 Ruff、Python 编译、架构、复杂度和技术债预算检查。
