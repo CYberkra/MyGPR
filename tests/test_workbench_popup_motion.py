@@ -34,12 +34,15 @@ def test_reduced_menu_reaches_its_directional_endpoint(host, monkeypatch, direct
     menu.close()
 
 
-def test_menu_preference_change_and_keyboard_submenu(host, monkeypatch):
+@pytest.mark.parametrize('back_key', [Qt.Key.Key_Escape, Qt.Key.Key_Left])
+def test_menu_preference_change_and_keyboard_submenu(host, monkeypatch, back_key):
     monkeypatch.setattr(motion, 'animations_enabled', lambda: True)
     menu = make_menu(host)
     sub = RoundMenu('Group', menu)
     sub.addAction(Action('Open'))
     menu.addMenu(sub)
+    closed = []
+    menu.closedSignal.connect(lambda: closed.append(True))
     show_menu(menu, host.mapToGlobal(QPoint(20, 20)))
     assert menu.aniManager.ani.state() == QAbstractAnimation.State.Running
     monkeypatch.setattr(motion, 'animations_enabled', lambda: False)
@@ -47,8 +50,10 @@ def test_menu_preference_change_and_keyboard_submenu(host, monkeypatch):
     QTest.keyClick(menu.view, Qt.Key.Key_Right)
     assert sub.isVisible() and sub.pos() == sub.aniManager.ani.endValue()
     assert sub.aniManager.ani.state() == QAbstractAnimation.State.Stopped
-    QTest.keyClick(sub.view, Qt.Key.Key_Escape)
-    assert not sub.isVisible() and menu.isVisible()
+    QTest.keyClick(sub.view, back_key)
+    assert not sub.isVisible() and menu.isVisible() and not closed
+    QTest.keyClick(menu.view, Qt.Key.Key_Right)
+    assert sub.isVisible()
     menu.close()
 
 

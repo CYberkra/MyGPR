@@ -509,7 +509,8 @@ class BScanViewInteractionMixin:
             self._hide_crosshair()
             return
         view_point = self._plot.vb.mapSceneToView(pos)
-        trace, sample = int(view_point.x()), int(view_point.y())
+        # Floor keeps fractional positions below the origin outside the image.
+        trace, sample = math.floor(view_point.x()), math.floor(view_point.y())
         n_traces, n_samples = self._image_shape
         if not (0 <= trace < n_traces and 0 <= sample < n_samples):
             self._hide_crosshair()
@@ -729,7 +730,7 @@ class BScanViewInteractionMixin:
         if not self._plot.sceneBoundingRect().contains(pos):
             return
         view_point = self._plot.vb.mapSceneToView(pos)
-        trace, sample = int(view_point.x()), int(view_point.y())
+        trace, sample = math.floor(view_point.x()), math.floor(view_point.y())
         n_traces, n_samples = self._image_shape
         if 0 <= trace < n_traces and 0 <= sample < n_samples:
             # sig_point_picked 契约是原始数据坐标：预览可能降采样，

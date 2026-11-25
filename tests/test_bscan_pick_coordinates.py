@@ -37,7 +37,7 @@ class TestPickedCoordinatesAreOriginalGrid:
         qapp.processEvents()
         return view
 
-    def _click_at_view(self, view, trace: int, sample: int):
+    def _click_at_view(self, view, trace: float, sample: float):
         """在显示坐标 (trace, sample) 处模拟左键点击（走真实处理器）。"""
         from PyQt6.QtCore import QPointF, Qt
 
@@ -70,6 +70,21 @@ class TestPickedCoordinatesAreOriginalGrid:
         assert received == [expected]
         # 且确实发生了换算：2:1 降采样下不能等于显示坐标本身
         assert expected[0] > clicked_view[0]
+
+    @pytest.mark.parametrize('trace, sample, inside', [
+        (.5, 10.5, True), (10.5, .5, True), (-.5, 10.5, False), (10.5, -.5, False),
+    ])
+    def test_edge_pick_uses_actual_image_bounds(self, qapp, trace, sample, inside):
+        view = self._downsampled_view(qapp)
+        view._plot.vb.setRange(xRange=(-3, 15), yRange=(-3, 15), padding=0)
+        qapp.processEvents()
+        received = []
+        view.sig_point_picked.connect(lambda t, s: received.append((t, s)))
+
+        self._click_at_view(view, trace, sample)
+
+        expected = [view._view_to_data(int(trace), int(sample))] if inside else []
+        assert received == expected
 
     def test_clicked_signal_identity_when_not_downsampled(self, qapp):
         from ui.widgets.bscan_view import BScanView

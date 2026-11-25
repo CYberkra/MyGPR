@@ -39,7 +39,8 @@ class FluentMenuKeyboard(QObject):
     def _back(self, menu):
         parent = menu.parentMenu
         if parent is not None:
-            menu.hide()
+            # Fluent treats a bare hide as system dismissal of the menu chain.
+            menu._hideMenu(False)
             parent.view.setFocus(Qt.FocusReason.PopupFocusReason)
         else:
             menu.close()

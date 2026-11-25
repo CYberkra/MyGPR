@@ -22,6 +22,8 @@ SUITES = {
         "tests/test_bscan_preference_mirror.py",
         "tests/test_bscan_qc_visibility.py",
         "tests/test_bscan_colorbar_toggle.py",
+        "tests/test_bscan_crosshair.py",
+        "tests/test_bscan_pick_coordinates.py",
         "tests/test_bscan_viewport_levels.py",
         "tests/test_bscan_rectangle_selection.py",
         "tests/test_bscan_view_time_window.py",

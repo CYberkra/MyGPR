@@ -147,6 +147,20 @@ class TestCrosshairWidget:
         assert not view._vline.isVisible()
         assert view._readout.isHidden()
 
+    @pytest.mark.parametrize('x, y', [(-.5, 10.5), (10.5, -.5)])
+    def test_crosshair_stays_hidden_just_outside_image_origin(self, qapp, x, y):
+        from PyQt6.QtCore import QPointF
+
+        view = self._make_view(qapp)
+        view._plot.vb.setRange(xRange=(-3, 15), yRange=(-3, 15), padding=0)
+        qapp.processEvents()
+        view._on_mouse_moved(view._plot.vb.mapViewToScene(QPointF(.5, .5)))
+        assert view._vline.isVisible() and view._readout.isVisible()
+        outside = view._plot.vb.mapViewToScene(QPointF(x, y))
+        assert view._plot.sceneBoundingRect().contains(outside)
+        view._on_mouse_moved(outside)
+        self._assert_readout_cleared(view)
+
     def test_theme_styles_the_floating_fullscreen_button(self, qapp):
         from ui.widgets.bscan_view import BScanView
         from ui.theme_helpers import control_palette
