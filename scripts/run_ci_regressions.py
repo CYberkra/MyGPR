@@ -35,6 +35,7 @@ SUITES = {
         "tests/test_bscan_workspace.py",
         "tests/test_acquisition_marker_preview.py",
         "tests/test_processing_line_comparison.py",
+        "tests/test_line_comparison_preview.py",
     ),
     "algorithms": (
         "tests/test_image_denoising.py",

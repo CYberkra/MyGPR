@@ -67,6 +67,36 @@ def test_project_roundtrip_also_fences_already_queued_read(context, qapp):
     assert got == []
 
 
+@pytest.mark.parametrize("old_read_fails", [False, True])
+def test_switch_discards_queued_raw_preview_and_delivers_current_line(context, qapp, old_read_fails):
+    pc, queued, _ = context
+    bundles, revisions, failures, scoped_failures = [], [], [], []
+    pc.dataset_preview_ready.connect(lambda bundle: bundles.append(bundle.title))
+    pc.dataset_revision_ready.connect(lambda *args: revisions.append(args))
+    pc.preview_failed.connect(failures.append)
+    pc.preview_context_failed.connect(lambda *args: scoped_failures.append(args))
+    projects = pc._backend().projects
+    read = projects.read_window
+
+    def read_line(pid, line, **window):
+        if old_read_fails and line == "L01":
+            raise OSError("old line unreadable")
+        return read(pid, line, **window)
+
+    projects.read_window = read_line
+    pc.preview_line("L01")
+    worker = Thread(target=queued[0].execute)
+    worker.start()
+    worker.join()
+    pc.preview_line("L02")  # Selection changes after the L01 read finishes, before Qt dispatches it.
+    qapp.processEvents()
+    assert bundles == revisions == failures == scoped_failures == []
+    queued[1].execute()
+    assert bundles == ["测线 L02"]
+    assert revisions == [("P", "L02", "")]
+    assert failures == scoped_failures == []
+
+
 def test_reference_failure_does_not_poison_current_line(context):
     pc, queued, _ = context
     got, errors = [], []

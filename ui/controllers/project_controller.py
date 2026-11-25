@@ -1097,6 +1097,10 @@ class _PreviewLineCommand(_ProjectReadCommand):
         self._generation = generation
         self._reference_request = reference_request
 
+    def _context_is_current(self) -> bool:
+        return (super()._context_is_current()
+                and (bool(self._reference_request) or self._controller._preview_generation == self._generation))
+
     def _publish_reference(self, bundle, error='') -> None:
         self._publish('comparison_preview_ready', self._project_id, self._line_id,
                       self._reference_request, bundle, error)
@@ -1114,8 +1118,7 @@ class _PreviewLineCommand(_ProjectReadCommand):
                 info.shape,
                 lambda **window: backend.projects.read_window(
                     self._project_id, self._line_id, **window),
-                cancel_requested=lambda: not self._context_is_current() or (
-                    not self._reference_request and c._preview_generation != self._generation))
+                cancel_requested=lambda: not self._context_is_current())
             elevation = c._line_elevation(backend, self._project_id, self._line_id)
             trace_metadata = backend.projects.read_trace_metadata(self._project_id, self._line_id) or {}
             bundle = c._bundle_from_window(
@@ -1138,22 +1141,21 @@ class _PreviewLineCommand(_ProjectReadCommand):
             bundle = dataclasses.replace(bundle, acquisition_markers=tuple(metadata.get('acquisition_markers', ())))
             bundle = attach_marker_view(backend, bundle, self._project_id, self._line_id)
         except Exception as exc:  # noqa: BLE001
-            if not self._context_is_current() or (
-                    not self._reference_request and c._preview_generation != self._generation):
+            if not self._context_is_current():
                 return
             _LOGGER.exception("数据预览失败")
             if self._reference_request:
                 self._publish_reference(None, friendly_error_message(exc))
                 return
             reason = friendly_error_message(exc)
-            c.log_message.emit(f"数据预览失败：{reason}")
-            c.preview_context_failed.emit(self._project_id, self._line_id, '', reason)
-            c.preview_failed.emit(reason)
+            self._publish('log_message', f"数据预览失败：{reason}")
+            self._publish('preview_context_failed', self._project_id, self._line_id, '', reason)
+            self._publish('preview_failed', reason)
         else:
             if self._reference_request:
                 self._publish_reference(bundle)
                 return
-            if c._preview_generation != self._generation or c.current_project_id != self._project_id:
+            if not self._context_is_current():
                 return
             metadata = dict(getattr(info, 'metadata', {}) or {})
             revision = ''
@@ -1165,8 +1167,8 @@ class _PreviewLineCommand(_ProjectReadCommand):
                     break
                 nested = metadata.get('metadata')
                 metadata = nested if isinstance(nested, dict) else {}
-            c.dataset_revision_ready.emit(self._project_id, self._line_id, revision)
-            c.dataset_preview_ready.emit(bundle)
+            self._publish('dataset_revision_ready', self._project_id, self._line_id, revision)
+            self._publish('dataset_preview_ready', bundle)
 
 
 class _ComparisonArtifactsCommand(_ProjectReadCommand):
