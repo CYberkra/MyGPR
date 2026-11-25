@@ -120,6 +120,32 @@ def test_make_preview_bundle_counts_and_axes() -> None:
 
 
 @pytest.mark.unit
+def test_readonly_owned_matrix_records_exact_percentile_levels() -> None:
+    matrix = np.arange(21, dtype=np.float32).reshape(3, 7).copy()
+    matrix.setflags(write=False)
+    bundle = make_preview_bundle(matrix, p_low=25, p_high=75)
+    assert bundle.level_percentiles == (25.0, 75.0)
+    assert (bundle.vmin, bundle.vmax) == (5.0, 15.0)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize('foreign_buffer', [False, True])
+def test_mutable_parent_can_change_levels_after_bundle_creation(foreign_buffer):
+    raw = np.arange(20, dtype=np.float32).reshape(5, 4)
+    if foreign_buffer:
+        storage = bytearray(raw.tobytes())
+        raw = np.frombuffer(storage, dtype=np.float32).reshape(5, 4)
+        read_only_view = np.frombuffer(memoryview(storage).toreadonly(), dtype=np.float32).reshape(5, 4)
+    else:
+        read_only_view = raw.view()
+        read_only_view.setflags(write=False)
+    bundle = make_preview_bundle(read_only_view)
+    assert bundle.level_percentiles is None
+    raw.fill(100)
+    assert compute_levels(bundle.matrix, p_low=2, p_high=98) != (bundle.vmin, bundle.vmax)
+
+
+@pytest.mark.unit
 def test_make_preview_bundle_with_nan() -> None:
     matrix = np.random.default_rng(3).standard_normal((120, 80))
     matrix[::7, ::5] = np.nan
