@@ -158,7 +158,9 @@ class ManualGainPreview(QWidget):
         matrix = (self._result if self.mode.currentIndex() == 0 and self._result is not None
                   else self._bundle.matrix)
         state = self.view.export_display_state() if self.view._matrix is not None else {}
-        self.view.set_bundle(replace(self._bundle, matrix=matrix))
+        bundle = self._bundle if matrix is self._bundle.matrix else replace(
+            self._bundle, matrix=matrix, level_percentiles=None)
+        self.view.set_bundle(bundle)
         if state:
             self.view.restore_display_state(state, viewport=True)
 

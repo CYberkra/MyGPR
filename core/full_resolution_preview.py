@@ -49,6 +49,7 @@ def read_full_resolution_window(shape, reader, *, cancel_requested=None,
                     raise ValueError('B-scan 读取未返回完整分辨率数据；拒绝显示抽样结果')
                 matrix[row:end_row, column:end_column] = data
         matrix.flush()
+        matrix.setflags(write=False)
         completed = True
         return matrix, np.arange(rows, dtype=np.int64), np.arange(columns, dtype=np.int64)
     finally:

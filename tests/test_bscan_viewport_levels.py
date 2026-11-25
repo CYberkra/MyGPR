@@ -10,8 +10,11 @@ import pytest
 pytest.importorskip("PyQt6")
 from PyQt6.QtTest import QTest
 
+from core.gui_rendering import make_preview_bundle
+from ui import desktop_backend_facade as facade
 from ui.desktop_backend_facade import compute_display_levels
 from ui.widgets.bscan_view import BScanView
+from ui.widgets import bscan_view_data
 
 
 @pytest.fixture
@@ -40,6 +43,68 @@ def wait_levels(view, expected):
 
 def zoom(view, left=10, right=30, top=10, bottom=40):
     view._plot.vb.setRange(xRange=(left, right), yRange=(top, bottom), padding=0)
+
+
+def test_full_resolution_bundle_reuses_exact_levels_only_for_matching_pixels(qapp, monkeypatch):
+    raw = np.random.default_rng(96).normal(size=(100, 60)).astype(np.float32)
+    raw[5, 7] = np.nan
+    matrix, _, _ = facade.read_full_resolution_bscan(raw.shape, lambda **kw: (
+        raw, np.arange(100), np.arange(60)))
+    bundle = facade.build_preview_bundle("L1", matrix, p_low=5, p_high=93)
+    expected = compute_display_levels(raw, p_low=5, p_high=93)
+    assert bundle.level_percentiles == (5, 93)
+    np.testing.assert_array_equal((bundle.vmin, bundle.vmax), expected)
+    calls = []
+
+    def calculate(source, **kwargs):
+        calls.append(source.shape)
+        return compute_display_levels(source, **kwargs)
+
+    monkeypatch.setattr(bscan_view_data, "compute_display_levels", calculate)
+    view = BScanView(default_levels=(5, 93))
+    try:
+        view.resize(850, 540)
+        view.show()
+        qapp.processEvents()
+        calls.clear()
+        view.set_bundle(bundle)
+        assert not calls
+        np.testing.assert_allclose(view._image_item.levels, expected)
+        zoom(view)
+        view._refresh_selection_levels()
+        assert calls[-1] == (30, 20)
+        local = compute_display_levels(raw[10:40, 10:30], p_low=5, p_high=93)
+        np.testing.assert_allclose(view._image_item.levels, local)
+        view.set_levels_follow_view(False)
+        calls.clear()
+        view.set_display_levels(1, 99)
+        assert calls == [raw.shape]
+        np.testing.assert_allclose(view._image_item.levels, compute_display_levels(raw, p_low=1, p_high=99))
+        view.set_display_levels(5, 93)
+        calls.clear()
+        view.set_gain("tvg", db=12)
+        assert calls and calls[-1] == raw.shape
+        gained = compute_display_levels(view._image_item.image, p_low=5, p_high=93)
+        np.testing.assert_allclose(view._image_item.levels, gained)
+        view.clear()
+        view.set_gain("off")
+        calls.clear()
+        view.set_matrix(matrix, -999, 999)
+        assert calls == [raw.shape]
+        np.testing.assert_allclose(view._image_item.levels, expected)
+    finally:
+        view.close()
+        view.deleteLater()
+
+
+def test_mutable_parent_can_change_levels_after_bundle_creation():
+    raw = np.arange(20, dtype=np.float32).reshape(5, 4)
+    read_only_view = raw.view()
+    read_only_view.setflags(write=False)
+    bundle = make_preview_bundle(read_only_view)
+    assert bundle.level_percentiles is None
+    raw.fill(100)
+    assert compute_display_levels(bundle.matrix, p_low=2, p_high=98) != (bundle.vmin, bundle.vmax)
 
 
 def test_plain_zoom_recalculates_levels_without_a_rectangle_or_time_axis(viewport):

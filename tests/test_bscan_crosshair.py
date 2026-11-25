@@ -12,7 +12,8 @@ import pytest
 
 pytest.importorskip("PyQt6")  # 后端 CI（无 Qt）自动跳过，见 tests/conftest.py qapp 设计
 
-from ui.widgets.bscan_view import format_crosshair_readout  # noqa: E402
+from PyQt6.QtCore import QCoreApplication, QEvent, QPointF  # noqa: E402
+from ui.widgets.bscan_view import BScanView, format_crosshair_readout  # noqa: E402
 
 
 # ------------------------------------------------------------------ 纯函数
@@ -47,9 +48,35 @@ class TestFormatReadout:
 
 
 # ------------------------------------------------------------------ 控件行为
+@pytest.fixture
+def bare_view(qapp):
+    widget = BScanView()
+    yield widget
+    widget.close()
+    widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+
+
+@pytest.fixture
+def view(bare_view, qapp):
+    matrix = np.arange(50 * 20, dtype=np.float32).reshape(50, 20)
+    bundle = SimpleNamespace(
+        matrix=matrix, vmin=0.0, vmax=1000.0, title='t',
+        x_label='道数', y_label='采样点',
+        trace_count=20, sample_count=50,
+        trace_axis_m=np.arange(20, dtype=float) * 0.5,
+        sample_axis=np.arange(50, dtype=float) * 2.0,
+        sample_axis_label='时间 (ns)')
+    bare_view.set_bundle(bundle)
+    bare_view.resize(400, 300)
+    bare_view.show()              # offscreen 下也需 show，否则 ViewBox 尺寸为 0 映射退化
+    qapp.processEvents()
+    return bare_view
+
+
 class TestCrosshairWidget:
     def _queue_readout(self, view, trace=18, sample=8):
-        from PyQt6.QtCore import QPointF
         pos = view._plot.vb.mapViewToScene(QPointF(trace + .5, sample + .5))
         view._on_mouse_moved(pos)
         view._on_mouse_moved(pos)
@@ -72,16 +99,14 @@ class TestCrosshairWidget:
         view._flush_crosshair_readout()
 
     @pytest.mark.parametrize('traces', [3, 20])
-    def test_pending_readout_is_discarded_when_bundle_changes(self, qapp, traces):
-        view = self._make_view(qapp)
+    def test_pending_readout_is_discarded_when_bundle_changes(self, view, qapp, traces):
         view.set_bundle(self._bundle(20, 1.))
         qapp.processEvents()
         self._queue_readout(view)
         view.set_bundle(self._bundle(traces, 2.))
         self._assert_readout_cleared(view)
 
-    def test_pending_readout_is_discarded_on_axis_grid_switch(self, qapp):
-        view = self._make_view(qapp)
+    def test_pending_readout_is_discarded_on_axis_grid_switch(self, view, qapp):
         view.set_bundle(self._bundle(20, 1.))
         qapp.processEvents()
         self._queue_readout(view)
@@ -91,32 +116,12 @@ class TestCrosshairWidget:
         view.set_y_axis_mode('sample')
         self._assert_readout_cleared(view)
 
-    def test_clear_discards_pending_readout(self, qapp):
-        view = self._make_view(qapp)
+    def test_clear_discards_pending_readout(self, view):
         self._queue_readout(view)
         view.clear()
         self._assert_readout_cleared(view)
 
-    def _make_view(self, qapp):
-        from ui.widgets.bscan_view import BScanView
-        view = BScanView()
-        matrix = np.arange(50 * 20, dtype=np.float32).reshape(50, 20)
-        bundle = SimpleNamespace(
-            matrix=matrix, vmin=0.0, vmax=1000.0, title='t',
-            x_label='道数', y_label='采样点',
-            trace_count=20, sample_count=50,
-            trace_axis_m=np.arange(20, dtype=float) * 0.5,
-            sample_axis=np.arange(50, dtype=float) * 2.0,
-            sample_axis_label='时间 (ns)')
-        view.set_bundle(bundle)
-        view.resize(400, 300)
-        view.show()              # offscreen 下也需 show，否则 ViewBox 尺寸为 0 映射退化
-        qapp.processEvents()
-        return view
-
-    def test_mouse_move_shows_readout(self, qapp):
-        from PyQt6.QtCore import QPointF
-        view = self._make_view(qapp)
+    def test_mouse_move_shows_readout(self, view):
         pos = view._plot.vb.mapViewToScene(QPointF(10.5, 25.5))
         view._on_mouse_moved(pos)
         assert view._vline.isVisible()
@@ -128,9 +133,7 @@ class TestCrosshairWidget:
         assert '时间 (ns) 50' in text
         assert f'幅值 {float(25 * 20 + 10):.4g}' in text
 
-    def test_toggle_off_hides(self, qapp):
-        from PyQt6.QtCore import QPointF
-        view = self._make_view(qapp)
+    def test_toggle_off_hides(self, view):
         pos = view._plot.vb.mapViewToScene(QPointF(10.5, 25.5))
         view._on_mouse_moved(pos)
         view._toggle_crosshair(False)
@@ -139,19 +142,14 @@ class TestCrosshairWidget:
         view._on_mouse_moved(pos)   # 关闭后移动不再显示
         assert view._readout.isHidden()
 
-    def test_outside_image_hides(self, qapp):
-        from PyQt6.QtCore import QPointF
-        view = self._make_view(qapp)
+    def test_outside_image_hides(self, view):
         view.resize(400, 300)
         view._on_mouse_moved(QPointF(-100.0, -100.0))
         assert not view._vline.isVisible()
         assert view._readout.isHidden()
 
     @pytest.mark.parametrize('x, y', [(-.5, 10.5), (10.5, -.5)])
-    def test_crosshair_stays_hidden_just_outside_image_origin(self, qapp, x, y):
-        from PyQt6.QtCore import QPointF
-
-        view = self._make_view(qapp)
+    def test_crosshair_stays_hidden_just_outside_image_origin(self, view, qapp, x, y):
         view._plot.vb.setRange(xRange=(-3, 15), yRange=(-3, 15), padding=0)
         qapp.processEvents()
         view._on_mouse_moved(view._plot.vb.mapViewToScene(QPointF(.5, .5)))
@@ -161,11 +159,10 @@ class TestCrosshairWidget:
         view._on_mouse_moved(outside)
         self._assert_readout_cleared(view)
 
-    def test_theme_styles_the_floating_fullscreen_button(self, qapp):
-        from ui.widgets.bscan_view import BScanView
+    def test_theme_styles_the_floating_fullscreen_button(self, bare_view):
         from ui.theme_helpers import control_palette
 
-        view = BScanView()
+        view = bare_view
         view.apply_theme(True)
         # 工具条退役后，图内悬浮全屏钮是唯一常驻控件，仍吃调色板 QSS
         assert control_palette(True)['button_bg'] in view._fullscreen_btn.styleSheet()
@@ -177,11 +174,10 @@ class TestCrosshairWidget:
 
 
 class TestPreviewCoordinateMapping:
-    def test_downsampled_preview_maps_between_view_and_source_coordinates(self, qapp):
+    def test_downsampled_preview_maps_between_view_and_source_coordinates(self, bare_view):
         """Picks and overlays share the original, rather than preview, grid."""
-        from ui.widgets.bscan_view import BScanView
 
-        view = BScanView()
+        view = bare_view
         # A 900 × 900 preview represents a 1,800 × 1,800 source B-scan.
         # Check both endpoints and an interior location.  A 2:1 downsample
         # cannot make every source coordinate exactly reversible, so validate

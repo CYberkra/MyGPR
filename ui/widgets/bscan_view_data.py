@@ -85,6 +85,7 @@ class BScanViewDataMixin:
         """接收 PreviewBundle（鸭子类型，不 import core.gui_rendering）。"""
         self.set_matrix(
             bundle.matrix, bundle.vmin, bundle.vmax,
+            level_percentiles=getattr(bundle, 'level_percentiles', None),
             title=(str(getattr(bundle, 'title', '') or '')
                    if self._title_visible else ''),
             x_label=getattr(bundle, 'x_label', '道数'),
@@ -119,7 +120,7 @@ class BScanViewDataMixin:
             self._refresh_gain_render()
 
     def set_matrix(self, matrix, vmin, vmax, *,
-                   title="", x_label="道数", y_label="采样点") -> None:
+                   title="", x_label="道数", y_label="采样点", level_percentiles=None) -> None:
         """matrix 为 (samples, traces)，零拷贝视图直接显示。
 
         row-major 语义下 array[r, c] → (x=c, y=r)，故 (samples, traces)
@@ -155,6 +156,8 @@ class BScanViewDataMixin:
         self._hide_crosshair()
         self._clear_view_selection()
         self._matrix = view
+        self._raw_levels = ((level_percentiles, (float(vmin), float(vmax)))
+                            if level_percentiles is not None and not view.flags.writeable else None)
         # 直接 set_matrix 的调用方没有物理轴元数据，读数退回索引显示
         self._trace_axis_m = None
         self._sample_axis = None
@@ -434,9 +437,15 @@ class BScanViewDataMixin:
         else:
             # 色阶在**增益后**矩阵上取百分位：增益与百分位正交（增益纵向拉平、
             # 百分位横向裁剪），顺序为先增益、再取百分位
-            vmin, vmax = compute_display_levels(
-                self._levels_source_for_view(self._gain_applied(self._matrix)),
-                p_low=self._p_low, p_high=self._p_high)
+            source = self._levels_source_for_view(self._gain_applied(self._matrix))
+            # A full-viewport slice or ImageItem view can wrap the same exact pixels.
+            raw = self._matrix
+            if (self._raw_levels is not None and self._raw_levels[0] == (self._p_low, self._p_high)
+                    and source.shape == raw.shape and source.strides == raw.strides
+                    and source.dtype == raw.dtype and source.ctypes.data == raw.ctypes.data):
+                vmin, vmax = self._raw_levels[1]
+            else:
+                vmin, vmax = compute_display_levels(source, p_low=self._p_low, p_high=self._p_high)
             if self.display_mode is BScanDisplayMode.ENVELOPE:
                 vmin, vmax = 0.0, max(float(vmax), 1e-12) / self._contrast
             else:

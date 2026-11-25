@@ -59,6 +59,7 @@ class PreviewBundle:
     trace_qc_local_mask: np.ndarray | None = None
     marker_view: Any = None  # immutable project marker context, with per-result projection
     acquisition_markers: tuple[dict, ...] = ()  # original file-local 1-based rows; raw preview only
+    level_percentiles: tuple[float, float] | None = None  # exact vmin/vmax on this read-only matrix
 
     def __post_init__(self) -> None:
         matrix = np.asarray(self.matrix, dtype=np.float32)
@@ -203,6 +204,15 @@ def _downsample_axis(axis: Any, step: int, expected: int) -> np.ndarray | None:
     return np.ascontiguousarray(sliced[:expected])
 
 
+def _readonly_level_percentiles(matrix, low, high) -> tuple[float, float] | None:
+    # A read-only slice can still have a writable parent.
+    while isinstance(matrix, np.ndarray):
+        if matrix.flags.writeable:
+            return None
+        matrix = matrix.base
+    return float(low), float(high)
+
+
 def make_preview_bundle(
     matrix: Any,
     *,
@@ -229,6 +239,7 @@ def make_preview_bundle(
         matrix=preview,
         vmin=vmin,
         vmax=vmax,
+        level_percentiles=_readonly_level_percentiles(preview, p_low, p_high),
         sample_count=sample_count,
         trace_count=trace_count,
         title=str(title or ""),
@@ -357,11 +368,8 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         elevation = _dataset_elevation(dataset, trace_count)
     else:
         elevation = align_trace_vector(elevation, trace_count)
-    vmin, vmax = compute_levels(
-        preview,
-        p_low=float(kw.pop("p_low", 2.0)),
-        p_high=float(kw.pop("p_high", 98.0)),
-    )
+    p_low, p_high = float(kw.pop("p_low", 2.0)), float(kw.pop("p_high", 98.0))
+    vmin, vmax = compute_levels(preview, p_low=p_low, p_high=p_high)
     if kw:
         unexpected = ", ".join(sorted(kw))
         raise TypeError(f"unexpected keyword arguments: {unexpected}")
@@ -369,6 +377,7 @@ def bundle_from_dataset(dataset: Any, **kw: Any) -> PreviewBundle:
         matrix=preview,
         vmin=vmin,
         vmax=vmax,
+        level_percentiles=_readonly_level_percentiles(preview, p_low, p_high),
         sample_count=sample_count,
         trace_count=trace_count,
         title=title,
