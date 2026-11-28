@@ -36,7 +36,7 @@ from ui.widgets.settings_controls import SettingsDisclosure
 
 
 SETTINGS_CATEGORIES = {
-    'appearance': '外观与工作区',
+    'appearance': '外观与布局',
     'bscan': 'B-scan 显示',
     'processing': '处理默认值',
     'spatial': '空间与底图',
@@ -122,13 +122,13 @@ def read_application_version() -> str:
 
 # Widget-scoped bindings also appear when their pages have yet to be initialized.
 _CONTEXT_SHORTCUTS = (
-    ('运行待执行处理链', 'Ctrl+R', '处理页'),
-    ('关闭当前成果标签', 'Ctrl+W', 'B-scan 成果区'),
-    ('恢复最近关闭的成果标签', 'Ctrl+Shift+T', 'B-scan 成果区'),
-    ('切换到下一个成果标签', 'Ctrl+Tab', 'B-scan 成果区'),
-    ('切换到上一个成果标签', 'Ctrl+Shift+Tab', 'B-scan 成果区'),
-    ('向右拆分当前成果标签', 'Ctrl+Alt+Right', 'B-scan 成果区'),
-    ('向下拆分当前成果标签', 'Ctrl+Alt+Down', 'B-scan 成果区'),
+    ('运行待执行处理', 'Ctrl+R', '处理页'),
+    ('关闭当前标签', 'Ctrl+W', 'B-scan 成果区'),
+    ('恢复最近关闭的标签', 'Ctrl+Shift+T', 'B-scan 成果区'),
+    ('切换到下一个标签', 'Ctrl+Tab', 'B-scan 成果区'),
+    ('切换到上一个标签', 'Ctrl+Shift+Tab', 'B-scan 成果区'),
+    ('向右拆分当前标签', 'Ctrl+Alt+Right', 'B-scan 成果区'),
+    ('向下拆分当前标签', 'Ctrl+Alt+Down', 'B-scan 成果区'),
     ('切换全屏浏览', 'F11', 'B-scan 图面'),
     ('退出全屏浏览', 'Esc', 'B-scan 独立全屏'),
 )

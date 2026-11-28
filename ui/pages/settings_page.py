@@ -613,9 +613,9 @@ class SettingsPage(QWidget):
 
     def _build_about(self, key: str) -> None:
         layout = self._category(key)
-        self._row(layout, 'MyGPR', settings_label(_read_version(), 'hint'))
-        self._row(layout, '作者', settings_label('邸建豪 袁林 詹萍', 'hint'))
-        self._row(layout, '版权', settings_label('© 2025 MyGPR 保留所有权利', 'hint'))
+        self._row(layout, 'AGPR 无人机航空探地雷达数据处理软件', settings_label(_read_version(), 'hint'))
+        self._row(layout, '作者', settings_label('邸建豪 袁林 ', 'hint'))
+        self._row(layout, '版权', settings_label('© CDUT 保留所有权利', 'hint'))
         guide = PushButton('使用手册')
         guide.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(_USER_GUIDE_URL)))
         self._row(layout, '文档', guide)
