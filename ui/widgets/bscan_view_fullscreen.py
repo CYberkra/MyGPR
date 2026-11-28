@@ -46,6 +46,12 @@ class BScanViewFullscreenMixin:
             self._fullscreen.closed.connect(self._on_fullscreen_closed)
             self._fullscreen.take(self)
             self._move_companions_to_host()
+            # 回放上次全屏几何：restoreGeometry 把 host 移到上次那块屏，
+            # 随后的 expand() 再取该屏 availableGeometry。
+            self._fullscreen._geometry_saver = getattr(self, '_geometry_saver', None)
+            loader = getattr(self, '_geometry_loader', None)
+            if loader is not None:
+                self._fullscreen.restore_saved_geometry(loader())
         self._fullscreen.expand()
         self._layout_fullscreen_controls()
 

@@ -312,7 +312,7 @@ class SpatialPage(SpatialMarkersMixin, SpatialContextMenuMixin, SpatialDeliveryM
         self._view_segment.addItem(
             _SEG_MAP, '平面地图', onClick=lambda: self._switch_view(_SEG_MAP))
         self._view_segment.addItem(
-            _SEG_PROFILE, '高程剖面', onClick=lambda: self._switch_view(_SEG_PROFILE))
+            _SEG_PROFILE, '航高剖面', onClick=lambda: self._switch_view(_SEG_PROFILE))
         self._view_segment.addItem(
             _SEG_3D, '三维视图', onClick=lambda: self._switch_view(_SEG_3D))
         self._view_segment.addItem(

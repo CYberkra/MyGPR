@@ -2,7 +2,7 @@
 
 <img src="ui/resources/mygpr_logo.png" width="96" alt="MyGPR 图标：无人机航测滑坡剖面">
 
-MyGPR 是 **CDUT-UavGPR 无人机探地雷达平台的数据处理、成像解释与成果交付工作台**，面向滑坡等航空探地雷达（AGPR）测区，提供桌面应用和无头后端。
+MyGPR 是 **CDUT-UavGPR 无人机探地雷达平台的数据处理、成像软件**，面向滑坡等航空探地雷达（AGPR）测区，提供桌面应用和无头后端。
 PyQt6 + PyQt6-Fluent-Widgets 桌面前端，配分层后端（`mygpr/` 清洁架构 + `core/` 遗留内核）。
 
 > 架构与工程约束：[CLAUDE.md](CLAUDE.md)；当前状态：[CURRENT_STATE.md](CURRENT_STATE.md)；交接规则：[DEV_HANDOFF.md](DEV_HANDOFF.md)；设计规格索引：[specs](docs/superpowers/specs/README.md)。
