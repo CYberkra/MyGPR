@@ -9,14 +9,16 @@
 PlaceholderPage（QLabel '页面建设中' 居中），controller / 面板为 None（connect 判空）。
 """
 import logging
+import os
+from pathlib import Path
 
 from PyQt6.QtCore import (
     Qt, QSize, pyqtSignal,
 )
 from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QDialog, QFormLayout, QHBoxLayout, QLabel, QPushButton, QSplitter,
-    QTextBrowser, QToolButton, QVBoxLayout, QWidget,
+    QDialog, QFormLayout, QHBoxLayout, QLabel, QSplitter, QToolButton,
+    QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     FluentIcon as FIF, FluentWindow, InfoBar, InfoBarPosition,
@@ -160,16 +162,18 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
             from qfluentwidgets import InfoBar
             InfoBar.warning(title='拖入导入', content='请先打开可写项目，并等待当前任务或后端初始化完成。', parent=self)
 
-    def _inject_page_settings(self) -> None:
-        """注入设置页保存的默认值到各页面控件（非信号驱动，首次启动 / 重启生效）。"""
-        project = self._page('projectInterface')
-        if hasattr(project, 'set_default_dielectric'):
-            project.set_default_dielectric(
-                self.settings.get('default_dielectric', constants.DEFAULT_DIELECTRIC))
-        spatial = self._page('spatialInterface')
-        if hasattr(spatial, 'set_auto_prefetch_enabled'):
-            spatial.set_auto_prefetch_enabled(
-                bool(self.settings.get('auto_prefetch_basemap', True)))
+    def _inject_page_settings(self, changed: set[str] | None = None) -> None:
+        """将已保存的默认值传给使用它们的页面。"""
+        if changed is None or 'default_dielectric' in changed:
+            project = self._page('projectInterface')
+            if hasattr(project, 'set_default_dielectric'):
+                project.set_default_dielectric(
+                    self.settings.get('default_dielectric', constants.DEFAULT_DIELECTRIC))
+        if changed is None or 'auto_prefetch_basemap' in changed:
+            spatial = self._page('spatialInterface')
+            if hasattr(spatial, 'set_auto_prefetch_enabled'):
+                spatial.set_auto_prefetch_enabled(
+                    bool(self.settings.get('auto_prefetch_basemap', True)))
 
     # ============================================================ 组装
     def _init_window(self) -> None:
@@ -268,15 +272,15 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # 互相覆盖（共享实例是唯一写者）
         if hasattr(page, 'set_settings_manager'):
             page.set_settings_manager(self.settings)
-        # B-Scan 显示偏好（比例/轴单位/色阶/全屏几何）：四页都有 BScanView，
-        # 统一在此恢复与持久化，避免在四个页面里各写一遍（漏一个就是"某页记不住"）
-        self._wire_bscan_preferences(page)
-        from ui.widgets.bscan_view import BScanView
-        for view in page.findChildren(BScanView):
-            view.setProperty('mygprPreferencesWired', True)
-        created = getattr(page, 'bscan_view_created', None)
-        if hasattr(created, 'connect'):
-            created.connect(self._wire_new_bscan_view)
+        # 设置页的合成预览独立管理显示参数和基准切换。
+        if object_name != 'settingsInterface':
+            self._wire_bscan_preferences(page)
+            from ui.widgets.bscan_view import BScanView
+            for view in page.findChildren(BScanView):
+                view.setProperty('mygprPreferencesWired', True)
+            created = getattr(page, 'bscan_view_created', None)
+            if hasattr(created, 'connect'):
+                created.connect(self._wire_new_bscan_view)
         page.setObjectName(object_name)
         self.addSubInterface(page, icon, text, position=position)
         self.pages[object_name] = page
@@ -292,24 +296,58 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         view.setProperty('mygprPreferencesWired', True)
 
     def _on_settings_general_changed(self) -> None:
-        """设置页通用项变化：采集 → 写盘 → 重新注入各页。
-
-        介电常数 / 并行线程数 / 项目根目录 / 自动预下载底图此前无任何
-        连接，改完既不落盘也不下发（真机：勾「自动预下载」毫无反应）。
-        主题不走这里——由 theme_changed 单独处理，避免重复套用。
-        """
+        """保存即时通用项，并下发成功保存的默认值。"""
         settings_page = self._page('settingsInterface')
         getter = getattr(settings_page, 'settings', None)
         if not callable(getter) or self.settings is None:
             return
         values = getter()
-        for key in ('default_dielectric', 'max_workers', 'project_root',
-                    'auto_prefetch_basemap'):
-            if key in values:
-                self.settings.set(key, values[key])
-        self.settings.save()
-        self._inject_page_settings()
-        self._update_workspace_navigation()
+        changes = {
+            key: values[key]
+            for key in ('default_dielectric', 'max_workers', 'auto_prefetch_basemap')
+            if key in values and self.settings.get(key) != values[key]
+        }
+        if changes and self._save_settings_page_preferences('general', changes):
+            self._inject_page_settings(set(changes))
+            self._update_workspace_navigation()
+
+    def _on_settings_project_root_requested(self, candidate: str) -> None:
+        page = self._page('settingsInterface')
+        try:
+            path = Path(candidate.strip()).expanduser()
+            if not path.is_absolute():
+                page.report_save('root', False, '请输入绝对路径，或浏览并选择目录。')
+                return
+            # Windows may deny canonicalization of an ancestor junction even
+            # when the chosen directory itself can be opened.
+            path = path.resolve(strict=False)
+            if not path.is_dir():
+                page.report_save('root', False, '请选择已存在的目录。')
+                return
+            with os.scandir(path):
+                pass
+        except (OSError, RuntimeError, ValueError):
+            page.report_save('root', False, '无法访问该路径，请选择已存在的目录。')
+            return
+
+        if not self.settings.commit({'project_root': str(path)}):
+            page.report_save('root', False, '默认目录未保存，仍使用上次保存的路径。')
+            return
+        page.commit_project_root(str(path))
+        page.report_save('root', True, '已保存，下次新建项目时使用。')
+
+    def _on_restore_settings_layout_requested(self) -> None:
+        from ui.settings_support import restore_workspace_layout
+
+        page = self._page('settingsInterface')
+        saved = restore_workspace_layout(self)
+        message = '已恢复默认面板布局。' if saved else '布局设置未保存，当前布局保留。'
+        page.report_save('layout', saved, message)
+
+    def _show_settings_diagnostics(self) -> None:
+        from ui.settings_support import show_diagnostic_summary
+
+        show_diagnostic_summary(self, backend_ready=self._backend_ready)
 
     # ---------------------------------------------------------- 首屏后预热
     def _start_warmup(self) -> None:
@@ -740,11 +778,18 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         if hasattr(settings_page, 'bscan_view_changed'):
             settings_page.bscan_view_changed.connect(
                 self._on_settings_bscan_changed)
-        # 通用项（介电常数 / 线程数 / 项目根目录 / 自动预下载底图）：此前
-        # 无此接线 → 改了不写盘也不下发（真机反馈「设置页按钮没效果」）
         if hasattr(settings_page, 'general_changed'):
             settings_page.general_changed.connect(
                 self._on_settings_general_changed)
+        if hasattr(settings_page, 'project_root_requested'):
+            settings_page.project_root_requested.connect(
+                self._on_settings_project_root_requested)
+        if hasattr(settings_page, 'shortcuts_requested'):
+            settings_page.shortcuts_requested.connect(self._show_shortcuts_dialog)
+        if hasattr(settings_page, 'layout_reset_requested'):
+            settings_page.layout_reset_requested.connect(self._on_restore_settings_layout_requested)
+        if hasattr(settings_page, 'diagnostics_requested'):
+            settings_page.diagnostics_requested.connect(self._show_settings_diagnostics)
 
         # ---------------- 跨页业务信号链（项目/测线/导入/处理/解释/成果/任务）
         # 延后到预热收尾：connect_all() 需要全部页面存在（见 _finish_warmup）。
@@ -801,7 +846,11 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
 
     def _on_theme_changed(self, theme: str) -> None:
         """主题切换槽：全窗控件只应用一次主题，避免工作区与子视图重复重绘。"""
-        dark = str(theme) == constants.THEME_DARK
+        theme = str(theme)
+        if not self._restoring_settings and not self._save_settings_page_preferences(
+                'theme', {'theme': theme}):
+            return
+        dark = theme == constants.THEME_DARK
         apply_theme(theme)
         if self.output_panel is not None:
             self.output_panel.apply_theme(dark)
@@ -812,10 +861,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         # 设置页主题 ComboBox 回写（blockSignals 防循环）
         settings_page = self._page('settingsInterface')
         if hasattr(settings_page, 'set_theme_text'):
-            settings_page.set_theme_text(str(theme))
-        self.settings.set('theme', str(theme))
-        if not self._restoring_settings:
-            self.settings.save()
+            settings_page.set_theme_text(theme)
 
     def _set_backend_ready(self, ready: bool) -> None:
         """后端未就绪时禁用除主页/设置外的页面，就绪后恢复。"""
@@ -1044,30 +1090,10 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
         self._update_workspace_navigation()
 
     def _show_shortcuts_dialog(self) -> None:
-        """F1：弹出当前支持的快捷键清单。"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle('快捷键')
-        dialog.setMinimumSize(360, 300)
-        layout = QVBoxLayout(dialog)
-        text = QTextBrowser(dialog)
-        text.setOpenExternalLinks(False)
-        rows = ['<h3>快捷键清单</h3><ul>']
-        for seq, _obj, title in self._page_shortcuts:
-            rows.append(f'<li><b>{seq}</b>：切换到{title}</li>')
-        rows.extend([
-            '<li><b>Ctrl+B</b>：收起/展开左侧文件树</li>',
-            '<li><b>Ctrl+J</b>：收起/展开底部输出面板（日志/任务）</li>',
-            '<li><b>Ctrl+R</b>：处理页运行处理链</li>',
-            '<li><b>Ctrl+L</b>：处理页加载测线数据</li>',
-            '<li><b>Delete</b>：处理链删除选中步骤 / 项目页删除选中测线</li>',
-            '</ul><p>提示：处理链步骤行支持右键菜单（上移/下移/删除）。</p>',
-        ])
-        text.setHtml(''.join(rows))
-        layout.addWidget(text)
-        btn = QPushButton('关闭', dialog)
-        btn.clicked.connect(dialog.close)
-        layout.addWidget(btn)
-        dialog.exec()
+        """F1 与设置页共用快捷键清单。"""
+        from ui.settings_support import show_shortcuts
+
+        show_shortcuts(self)
 
     def _current_project_id(self):
         if self.project_controller is None:
@@ -1121,14 +1147,7 @@ class MyGPRMainWindow(BScanPreferenceMixin, FluentWindow):
                 self.interpretation_controller.close_session()
             except Exception as e:  # noqa: BLE001
                 logger.warning('关闭标注会话异常（已吞掉）: %s', e)
-        # 2) 持久化设置（含设置页当前控件值）
-        settings_page = self._page('settingsInterface')
-        if hasattr(settings_page, 'settings'):
-            try:
-                for key, value in settings_page.settings().items():
-                    self.settings.set(key, value)
-            except Exception as e:  # noqa: BLE001
-                logger.warning('设置页状态回写失败（已吞掉）: %s', e)
+        # 2) 持久化管理器中的状态（包括尚未写盘的处理会话布局）。
         self.settings.save()
         spatial = self._page('spatialInterface')
         shutdown_spatial = getattr(spatial, 'shutdown', None)

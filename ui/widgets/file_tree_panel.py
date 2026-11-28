@@ -7,7 +7,7 @@ processing input and a running task's frozen source are separate identities.
 Opening a context menu or viewing metadata does not activate its target. Running
 tasks protect their source ancestry while other results remain viewable.
 
-DockPanel owns the shell. Page collapse preferences, stable-key expansion
+DockPanel owns the shell. Page collapse preferences, stable-key browsing
 snapshots, lazy directory loading and bounded suffix width remain local here.
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QPoint, QSize, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontMetrics, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QDialogButtonBox, QHeaderView,
+    QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QHeaderView,
     QSizePolicy, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import BodyLabel, PlainTextEdit, TransparentToolButton, TreeWidget
@@ -41,8 +41,22 @@ from ui.widgets.fluent_menu_keyboard import FluentMenuKeyboard
 _ROLE_PAYLOAD = Qt.ItemDataRole.UserRole        # line → line_id；artifact → artifact_id；spatial → result_id；report → package_dir
 _ROLE_KIND = Qt.ItemDataRole.UserRole + 1       # TreeNode.kind
 _ROLE_AUX = Qt.ItemDataRole.UserRole + 2        # artifact → 所属 line_id
-_ROLE_KEY = Qt.ItemDataRole.UserRole + 3        # TreeNode.key（重建快照展开态用）
+_ROLE_KEY = Qt.ItemDataRole.UserRole + 3        # TreeNode.key（恢复展开、选中和滚动位置）
 _ROLE_SUFFIX = Qt.ItemDataRole.UserRole + 4     # 原始角标；输入标记不覆盖它
+
+
+def _source_key(source: tuple[str, str] | None) -> str:
+    if source is None:
+        return ''
+    line_id, artifact_id = source
+    return f'artifact:{artifact_id}' if artifact_id else f'raw:{line_id}'
+
+
+def _reveal_item(item) -> None:
+    while item is not None:
+        item.setExpanded(True)
+        item = item.parent()
+
 
 def suffix_column_width(view_width: int, widest_suffix_px: int) -> int:
     """角标列（第二列）宽度：内容宽 + 留白，且不超过视口宽的 _SUFFIX_MAX_RATIO。
@@ -243,22 +257,21 @@ class FileTreePanel(DockPanel):
         self._project_root = str(getattr(summary, 'root_path', '') or '') \
             if summary else ''
         identity = str(getattr(summary, 'project_id', '') or self._project_root or name)
-        changed = identity != self._project_identity
-        if changed or summary is None:
+        reset = identity != self._project_identity or summary is None
+        self._project_identity = identity
+        if reset:
             self._active_source = None
             self._processing_input = None
-        self._project_identity = identity
-        if changed or summary is None:
             self._lines = []
             self._artifacts = []
             self._artifacts_sig = []   # 重置去重签名：重开同项目也要重建
             self._spatial_results = []
             self._reports = []
             self._current_line_id = ''
-        self._rebuild()
+        self._rebuild(preserve_view=not reset)
 
     def set_lines(self, lines: list) -> None:
-        """重建树；保留当前选中（展开态新建组默认全开）。"""
+        """重建树并保留同一项目的浏览位置。"""
         self._lines = list(lines or [])
         self._rebuild()
 
@@ -290,7 +303,17 @@ class FileTreePanel(DockPanel):
         self._current_line_id = str(line_id or '')
         self._syncing = True
         try:
-            self._select_leaf(self._current_line_id)
+            selected = self._tree.currentItem()
+            if (selected is not None and self._current_line_id
+                    and self._item_line(selected) == self._current_line_id):
+                # 树内跨线点击成果时，协调器切线同步不覆盖用户点选的行。
+                _reveal_item(selected if selected.data(0, _ROLE_KIND) == 'line' else selected.parent())
+            else:
+                line = self._line_id_by_item.get(self._current_line_id)
+                _reveal_item(line)
+                self._tree.setCurrentItem(line)
+                if line is not None:
+                    self._tree.scrollToItem(line)
         finally:
             self._syncing = False
         self._update_strip_text()
@@ -306,14 +329,10 @@ class FileTreePanel(DockPanel):
         self._active_source = (str(line_id), str(artifact_id or '')) if line_id else None
         self._refresh_input_marker()
         if previous != self._active_source and self._active_source is not None:
-            line, aid = self._active_source
-            key = f'artifact:{aid}' if aid else f'raw:{line}'
+            key = _source_key(self._active_source)
             for item in self._items():
                 if item.data(0, _ROLE_KEY) == key:
-                    parent = item.parent()
-                    while parent is not None:
-                        parent.setExpanded(True)
-                        parent = parent.parent()
+                    _reveal_item(item.parent())
                     break
 
     def set_processing_input(self, line_id: str, artifact_id: str = '', running: bool = False) -> None:
@@ -329,7 +348,7 @@ class FileTreePanel(DockPanel):
         if self._processing_input is None:
             return
         line_id, artifact_id = self._processing_input
-        source_key = f'artifact:{artifact_id}' if artifact_id else f'raw:{line_id}'
+        source_key = _source_key(self._processing_input)
         source = next((item for item in self._items()
                        if item.data(0, _ROLE_KEY) == source_key), None)
         if source is None:
@@ -339,9 +358,7 @@ class FileTreePanel(DockPanel):
             tooltip='任务使用此冻结输入；只有成功保存的输出才可打开或继续处理。',
         ))
         if reveal:
-            while source is not None:
-                source.setExpanded(True)
-                source = source.parent()
+            _reveal_item(source)
 
     def _items(self):
         work = list(reversed(self._top_items()))
@@ -362,8 +379,9 @@ class FileTreePanel(DockPanel):
                             str(item.data(0, _ROLE_PAYLOAD) or ''))
             active = identity is not None and identity == self._active_source
             suffix = str(item.data(0, _ROLE_SUFFIX) or '')
-            text = ' '.join(part for part in (suffix, '输入' if active else '') if part)
+            text = ' '.join(part for part in (suffix, '处理输入' if active else '') if part)
             item.setText(1, text)
+            item.setToolTip(1, text)
             item.setForeground(1, QBrush(QColor(color('primary' if active else 'text_muted', self._dark))))
             item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             font = item.font(0)
@@ -371,8 +389,8 @@ class FileTreePanel(DockPanel):
                            else QFont.Weight.Normal)
             item.setFont(0, font)
             if kind in ('raw', 'artifact'):
-                item.setForeground(0, QBrush(QColor(color('primary' if active else
-                    ('text_secondary' if kind == 'raw' else 'text_primary'), self._dark))))
+                name_color = 'text_secondary' if kind == 'raw' else 'text_primary'
+                item.setForeground(0, QBrush(QColor(color(name_color, self._dark))))
             if text:
                 self._suffixes.add(text)
         self._apply_suffix_width()
@@ -424,6 +442,11 @@ class FileTreePanel(DockPanel):
                 and previous.get('run_step_index') == index - 1)
 
     # ------------------------------------------------ 页面记忆（主窗口调）
+    def restore_default_layout(self) -> None:
+        """清除按页收展记忆，保留当前页面、树内容和选择。"""
+        self._page_states.clear()
+        self.apply_page(self._current_page)
+
     def apply_page(self, object_name: str) -> None:
         """切页时按该页记忆的展开态切换（瞬时，不做动画）。"""
         page = str(object_name or '')
@@ -477,31 +500,18 @@ class FileTreePanel(DockPanel):
         self._tree.setVisible(self._has_project)
         self._filler.setVisible(not self._has_project)
 
-    def _expanded_keys(self) -> set:
-        """Expanded identities, including directories whose lazy scan was empty."""
-        return {item.data(0, _ROLE_KEY) for item in self._items()
-                if item.isExpanded() and item.data(0, _ROLE_KEY)
-                and (item.childCount() > 0 or item.data(0, _ROLE_KIND) == 'dir')}
-
-    def _empty_category_keys(self) -> set:
-        """当前为空的分类/分组 key 集合：这类节点首次长出内容时应默认
-        展开（「新内容到达」事件，不能因快照里没有它而被压住折叠）。"""
-        return {item.data(0, _ROLE_KEY) for item in self._items()
-                if item.data(0, _ROLE_KIND) in ('category', 'group', 'line', 'raw', 'artifact')
-                and item.childCount() == 0 and item.data(0, _ROLE_KEY)}
-
-    def _rebuild(self) -> None:
+    def _rebuild(self, *, preserve_view: bool = True) -> None:
         self._close_context_menu()
         self._menu_generation += 1
-        # 快照展开态：数据刷新（打开工程/处理完成回灌成果/主题切换重建）
-        # 不应冲掉用户手动折叠的分类。树为空 = 首次构建，走默认展开规则。
-        snapshot = None
-        existing_keys: set = set()
-        empty_keys: set = set()
-        if self._tree.topLevelItemCount():
-            snapshot = self._expanded_keys()
-            empty_keys = self._empty_category_keys()
-            existing_keys = {item.data(0, _ROLE_KEY) for item in self._items()}
+        previous = {}
+        if preserve_view:
+            previous = {item.data(0, _ROLE_KEY): item for item in self._items()}
+        expanded = {key for key, item in previous.items() if item.isExpanded()}
+        empty = {key for key, item in previous.items() if item.childCount() == 0}
+        selected = self._tree.currentItem() if preserve_view else None
+        selected_key = selected.data(0, _ROLE_KEY) if selected is not None else None
+        selected_line = self._item_line(selected)
+        scroll = self._view_anchor() if preserve_view else (None, 0, 0)
         self._tree.clear()
         self._line_id_by_item.clear()
         self._suffixes.clear()
@@ -510,39 +520,67 @@ class FileTreePanel(DockPanel):
         model = build_project_model(
             self._lines, self._artifacts, self._spatial_results,
             self._reports, self._project_root)
-        if not model:
-            self._apply_view_state()
-            return
-
         for node in model:
             self._add_node(None, node)
 
-        # 展开策略：无快照（首次构建）→ 分类/分组有内容就默认展开，
-        # 来源与附件保持折叠，让真实处理分支优先；用户展开后照常恢复。
-        # 空分类折叠（(0) 计数自明），目录不自动展开（子层走懒加载）。
-        # 有快照 → 按快照恢复；空分类首次长出内容（key ∈ empty_keys）
-        # 仍默认展开。目录恢复展开会触发懒加载替换占位行，新子节点
-        # 继续入栈，深层展开态也能恢复（worklist 而非递归的原因）。
-        work = list(self._top_items())
-        while work:
-            item = work.pop()
-            kind = item.data(0, _ROLE_KIND)
-            key = item.data(0, _ROLE_KEY)
-            if item.childCount() > 0 and not item.isExpanded():
-                if kind in ('category', 'group', 'line', 'raw', 'artifact'):
-                    if key == 'category:来源与附件':
-                        item.setExpanded(bool(snapshot and key in snapshot))
-                    elif snapshot is None or key in snapshot \
-                            or key in empty_keys or key not in existing_keys:
-                        item.setExpanded(True)
-                elif kind == 'dir' and snapshot and key in snapshot:
-                    item.setExpanded(True)
-            work.extend(item.child(i)
-                        for i in range(item.childCount()))
-        self._refresh_processing_placeholder()
+        items = self._restore_expansion(previous.keys(), expanded, empty)
+        line_key = f'line:{self._current_line_id}'
+        current_line = items.get(line_key)
+        reveal_line = current_line is not None and line_key not in previous
+        if reveal_line:
+            _reveal_item(current_line)
+        active_key = _source_key(self._active_source)
+        if active_key not in previous and active_key in items:
+            _reveal_item(items[active_key].parent())
+        self._refresh_processing_placeholder(reveal=_source_key(self._processing_input) not in previous)
         self._refresh_input_marker()
-        self._select_leaf(self._current_line_id)
+        selected_item = items.get(selected_key) or self._line_id_by_item.get(selected_line) or current_line
+        # Qt otherwise scrolls to the selection and expands a manually collapsed ancestor.
+        auto_scroll = self._tree.hasAutoScroll()
+        self._tree.setAutoScroll(False)
+        try:
+            self._tree.setCurrentItem(selected_item)
+        finally:
+            self._tree.setAutoScroll(auto_scroll)
         self._apply_view_state()
+        if reveal_line:
+            self._tree.scrollToItem(current_line)
+        else:
+            self._restore_view_anchor(items, scroll)
+
+    def _restore_expansion(self, previous, expanded, empty) -> dict:
+        items = {}
+        for item in self._items():
+            key = item.data(0, _ROLE_KEY)
+            items[key] = item
+            new_category = (item.data(0, _ROLE_KIND) == 'category'
+                            and key != 'category:来源与附件' and item.childCount() > 0
+                            and (key not in previous or key in empty))
+            if key in expanded or new_category:
+                # itemExpanded 同步载入懒目录，_items 在 yield 之后才遍历子项。
+                item.setExpanded(True)
+        return items
+
+    def _view_anchor(self) -> tuple:
+        tree = self._tree
+        index = tree.indexAt(QPoint(tree.viewport().width() // 2, 0))
+        item = tree.itemFromIndex(index)
+        value = tree.verticalScrollBar().value()
+        if item is None:
+            return None, 0, value
+        return item.data(0, _ROLE_KEY), tree.visualItemRect(item).top(), value
+
+    def _restore_view_anchor(self, items, scroll) -> None:
+        key, top, value = scroll
+        tree = self._tree
+        bar = tree.verticalScrollBar()
+        anchor = items.get(key) if key is not None else None
+        if anchor is None:
+            bar.setValue(value)
+            return
+        tree.scrollToItem(anchor, QAbstractItemView.ScrollHint.PositionAtTop)
+        if tree.verticalScrollMode() == QAbstractItemView.ScrollMode.ScrollPerPixel:
+            bar.setValue(bar.value() + tree.visualItemRect(anchor).top() - top)
 
     def _apply_suffix_width(self) -> None:
         """角标列定宽：内容宽 + 留白，且不超过视口宽的 _SUFFIX_MAX_RATIO。
@@ -671,12 +709,14 @@ class FileTreePanel(DockPanel):
             self._add_node(item, node)
         self._apply_suffix_width()   # 懒加载出的角标可能比原有的更宽
 
-    def _select_leaf(self, line_id: str) -> None:
-        node = self._line_id_by_item.get(str(line_id or ''))
-        if node is not None:
-            self._tree.setCurrentItem(node)
-        elif self._tree.currentItem() is not None:
-            self._tree.setCurrentItem(None)
+    @staticmethod
+    def _item_line(item) -> str:
+        if item is None:
+            return ''
+        kind = item.data(0, _ROLE_KIND)
+        if kind == 'artifact':
+            return str(item.data(0, _ROLE_AUX) or '')
+        return str(item.data(0, _ROLE_PAYLOAD) or '') if kind in ('line', 'raw') else ''
 
     def _on_item_clicked(self, item, _column: int) -> None:
         if self._syncing or self._busy:

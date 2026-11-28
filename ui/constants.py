@@ -203,6 +203,22 @@ COLORMAPS = ['seismic', 'hot', 'jet', 'gray', 'viridis', 'plasma',
              'inferno', 'magma', 'cividis']
 DEFAULT_COLORMAP = 'seismic'
 
+BSCAN_GAIN_MODES = ('off', 'sec', 'tvg', 'piecewise_tvg', 'agc')
+# Editable nodes follow the full sampling axis. The start node is fixed at 0 dB.
+BSCAN_TVG_NODES = (
+    (0.33, 'bscan_tvg_33_db', 8.0),
+    (0.67, 'bscan_tvg_67_db', 16.0),
+    (1.0, 'bscan_tvg_100_db', 24.0),
+)
+BSCAN_TVG_NODE_RANGE = (0.0, 60.0)
+BSCAN_AGC_WINDOW_DEFAULT = 21
+BSCAN_AGC_WINDOW_RANGE = (3, 301)
+BSCAN_AGC_MAX_DB_DEFAULT = 18.0
+BSCAN_AGC_MAX_DB_RANGE = (0.0, 60.0)
+BSCAN_AGC_KEYS = ('bscan_agc_window', 'bscan_agc_max_db')
+BSCAN_GAIN_KEYS = ('bscan_gain_mode', 'bscan_gain_alpha', 'bscan_tvg_db', 'bscan_tvg_power',
+                  *(key for _, key, _ in BSCAN_TVG_NODES), *BSCAN_AGC_KEYS)
+
 THEME_LIGHT = '浅色主题'
 THEME_DARK = '深色主题'
 

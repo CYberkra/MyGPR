@@ -25,6 +25,30 @@ def test_explicit_settings_path_overrides_environment(tmp_path, monkeypatch):
     assert SettingsManager(str(target)).settings_file == str(target)
 
 
+def test_failed_commit_preserves_previous_preferences(tmp_path, monkeypatch):
+    target = tmp_path / 'settings.json'
+    settings = SettingsManager(str(target))
+    assert settings.commit({'bscan_p_low': 4.0, 'bscan_p_high': 95.0})
+    original = target.read_bytes()
+    monkeypatch.setattr(settings, 'save', lambda: False)
+
+    assert not settings.commit({'bscan_p_low': 5.0, 'bscan_p_high': 88.0})
+    assert (settings.get('bscan_p_low'), settings.get('bscan_p_high')) == (4.0, 95.0)
+    assert target.read_bytes() == original
+
+
+def test_resolving_tile_cache_for_diagnostics_does_not_create_it(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from core.app_paths import get_tile_cache_dir
+
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    cache = Path(get_tile_cache_dir(create=False))
+    assert cache == tmp_path / 'MyGPR' / 'tile_cache'
+    assert not cache.parent.exists()
+    assert Path(get_tile_cache_dir()) == cache and cache.is_dir()
+
+
 def test_unreadable_settings_are_preserved_until_reload(tmp_path, monkeypatch):
     target = tmp_path / 'settings.json'
     original = '{"extension": "keep"}'

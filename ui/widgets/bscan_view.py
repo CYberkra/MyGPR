@@ -146,12 +146,15 @@ class BScanView(BScanMarkerEventsMixin, BScanSelectionMixin, BScanTimeWindowMixi
         self._acquisition_markers_visible = True
         self._acquisition_markers_available = False
         self._marker_hover_index = None      # 悬浮中的标记下标（交互 mixin 用）
-        # 显示增益（SEC/TVG）：显示域逐行缩放（raw 一个字节不动）；增益后
+        # 显示增益：显示域逐行缩放（raw 一个字节不动）；增益后
         # 矩阵按 (矩阵身份, 模式+参数) 缓存复用。TVG 参数经滑条面板调整
         self._gain_mode = 'off'
         self._gain_alpha = 0.2
         self._gain_db = 24.0        # TVG 深端总增益（dB）
         self._gain_power = 1.0      # TVG 曲线弯度（幂次：1 线性，>1 集中深部）
+        self._gain_segment_db = tuple(default for _, _, default in constants.BSCAN_TVG_NODES)
+        self._gain_agc_window = constants.BSCAN_AGC_WINDOW_DEFAULT
+        self._gain_agc_max_db = constants.BSCAN_AGC_MAX_DB_DEFAULT
         self._gain_cache = None
         self._envelope_cache = None
         self._contrast = 1.0

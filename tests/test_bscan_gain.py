@@ -122,7 +122,7 @@ class TestSecGainOnView:
         view, _ = _make_view(qapp)
         try:
             with pytest.raises(ValueError):
-                view.set_gain('agc')
+                view.set_gain('unknown')
         finally:
             view.close()
 

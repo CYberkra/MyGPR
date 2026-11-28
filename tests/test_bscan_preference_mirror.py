@@ -89,7 +89,10 @@ class TestSettingsPageMirror:
             'bscan_p_low': 3.0, 'bscan_p_high': 97.0,
         })
         assert fired == []
-        assert page._loading_settings is False      # 守卫要复位
+        assert page._bscan_aspect_combo.currentData() == 'square'
+        page._bscan_aspect_combo.setCurrentIndex(page._bscan_aspect_combo.findData('cell'))
+        assert fired == [1]
+        assert page.bscan_view_settings()['bscan_aspect_mode'] == 'cell'
 
     def test_partial_sync_leaves_other_widgets_alone(self, page):
         page.load_settings({'bscan_aspect_mode': 'free', 'bscan_x_axis': 'trace'})
@@ -140,7 +143,7 @@ class TestSettingsPageMirror:
         assert page._bscan_gain_alpha_spin.value() == pytest.approx(1.5)
 
     def test_round_trip_through_settings(self, page):
-        """同步后 settings() 必须原样回读出同步值——closeEvent 靠的就是它。"""
+        """同步后完整的显示偏好可以原样回读。"""
         page.load_settings(dict.fromkeys(_BSCAN_KEYS))
         wanted = {
             'bscan_contrast': 1.0,
@@ -150,10 +153,15 @@ class TestSettingsPageMirror:
             'bscan_colormap': 'viridis',
             'bscan_p_low': 6.0,
             'bscan_p_high': 94.0,
-            'bscan_gain_mode': 'sec',
+            'bscan_gain_mode': 'agc',
             'bscan_gain_alpha': 1.5,
             'bscan_tvg_db': 33.0,
             'bscan_tvg_power': 1.7,
+            'bscan_tvg_33_db': 7.5,
+            'bscan_tvg_67_db': 13.0,
+            'bscan_tvg_100_db': 33.0,
+            'bscan_agc_window': 37,
+            'bscan_agc_max_db': 13.5,
             'bscan_colorbar_visible': False,
             'bscan_levels_follow_view': True,
             'bscan_qc_marks_visible': True,

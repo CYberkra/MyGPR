@@ -13,7 +13,13 @@ import numpy as np
 import pyqtgraph as pg
 from qfluentwidgets import InfoBar
 
-from ui.desktop_backend_facade import compute_display_levels, compute_display_envelope
+from ui import constants
+from ui.desktop_backend_facade import (
+    apply_display_agc,
+    compute_display_envelope,
+    compute_display_levels,
+    manual_gain_amplitude_factors,
+)
 from ui.widgets._colormap_data import COLORMAP_DATA
 from ui.widgets.bscan_axes import build_elevation_view
 from ui.widgets.bscan_view_interaction import BScanDisplayMode
@@ -87,6 +93,8 @@ class BScanViewDataMixin:
         # 十字光标读数用物理轴元数据（可选；与显示矩阵同降采样）
         self._trace_axis_m = getattr(bundle, 'trace_axis_m', None)
         self._sample_axis = getattr(bundle, 'sample_axis', None)
+        if self._sample_axis is not None and self._gain_mode not in ('off', 'agc'):
+            self._gain_cache = None  # Discard the row-index curve from set_matrix.
         self._sample_axis_label = str(
             getattr(bundle, 'sample_axis_label', '') or '')
         self._trace_count = int(getattr(bundle, 'trace_count', 0) or 0)
@@ -293,6 +301,9 @@ class BScanViewDataMixin:
             'gain_alpha': self._gain_alpha,
             'gain_db': self._gain_db,
             'gain_power': self._gain_power,
+            'gain_segment_db': list(self._gain_segment_db),
+            'gain_agc_window': self._gain_agc_window,
+            'gain_agc_max_db': self._gain_agc_max_db,
             'display_mode': self.display_mode.value,
             'crosshair': self._crosshair_on,
             'local_view': self._view_selection is not None or self._view_time_window is not None,
@@ -338,12 +349,15 @@ class BScanViewDataMixin:
             self.set_gain(str(state.get('gain', self.gain_mode())),
                           alpha=float(state.get('gain_alpha', self._gain_alpha)),
                           db=float(state.get('gain_db', self._gain_db)),
-                          power=float(state.get('gain_power', self._gain_power)))
+                          power=float(state.get('gain_power', self._gain_power)),
+                          segment_db=state.get('gain_segment_db'),
+                          agc_window=state.get('gain_agc_window'),
+                          agc_max_db=state.get('gain_agc_max_db'))
             if 'levels_override' in state:
                 self.set_levels_override(state['levels_override'])
             self.set_display_mode(state.get('display_mode', self.display_mode.value))
             self._toggle_crosshair(bool(state.get('crosshair', True)))
-        except (TypeError, ValueError, KeyError, AttributeError):
+        except (TypeError, ValueError, OverflowError, KeyError, AttributeError):
             pass
 
     def _is_legacy_startup_range(self, ranges) -> bool:
@@ -443,33 +457,57 @@ class BScanViewDataMixin:
 
     # ------------------------------------------------------------------ 显示增益
     def gain_mode(self) -> str:
-        """当前显示增益模式：'off' / 'sec' / 'tvg'。"""
+        """Return the current display gain mode."""
         return self._gain_mode
 
     def set_gain(self, mode: str, *, alpha: float | None = None,
                  db: float | None = None, power: float | None = None,
+                 segment_db: tuple[float, ...] | list[float] | None = None,
+                 agc_window: int | None = None, agc_max_db: float | None = None,
                  notify: bool = False) -> None:
-        """切换显示增益；显示域逐行缩放，raw 一个字节不动。
+        """切换显示增益，保留原始矩阵。
 
         :param mode: 'off' 关闭 / 'sec' SEC 补偿（扩散∝深度 + 指数吸收）/
-            'tvg' TVG 补偿（用户滑条调参的幂次曲线）。
+            'tvg' 幂次曲线 / 'piecewise_tvg' 分段 dB 曲线 / 'agc' 限幅 AGC。
         :param alpha: SEC 衰减补偿系数（dB/采样轴单位：深度轴为 dB/m，
             时间轴为 dB/ns）；None 保持现值。
         :param db: TVG 深端总增益（dB，浅端恒为 0 增益）；None 保持现值。
         :param power: TVG 曲线弯度幂次（1 线性，>1 增益集中深部）；None 保持。
+        :param segment_db: 分段 TVG 的三个可调节点（dB）；None 保持。
+        :param agc_window: AGC 局部窗口（采样点数）；None 保持。
+        :param agc_max_db: AGC 最大放大量（dB）；None 保持。
         :param notify: True 时发 sig_gain_changed（TVG 另发
             sig_gain_params_changed 供宿主持久化参数）；恢复持久化阶段
             传 False。
         """
         mode = str(mode)
-        if mode not in ('off', 'sec', 'tvg'):
+        if mode not in constants.BSCAN_GAIN_MODES:
             raise ValueError(f'未知增益模式: {mode!r}')
+        segment = self._gain_segment_db
+        if segment_db is not None:
+            low, high = constants.BSCAN_TVG_NODE_RANGE
+            if (not isinstance(segment_db, (list, tuple))
+                    or len(segment_db) != len(constants.BSCAN_TVG_NODES)
+                    or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                           or not low <= value <= high for value in segment_db)):
+                raise ValueError('分段 TVG 节点必须在 0～60 dB 内')
+            segment = tuple(float(value) for value in segment_db)
+        window = self._gain_agc_window if agc_window is None else int(agc_window)
+        maximum = self._gain_agc_max_db if agc_max_db is None else float(agc_max_db)
+        window_min, window_max = constants.BSCAN_AGC_WINDOW_RANGE
+        db_min, db_max = constants.BSCAN_AGC_MAX_DB_RANGE
+        if not (window_min <= window <= window_max and db_min <= maximum <= db_max):
+            raise ValueError('限幅 AGC 窗口或增益超出范围')
         changed = (mode != self._gain_mode
                    or (alpha is not None and float(alpha) != self._gain_alpha)
                    or (db is not None and float(db) != self._gain_db)
                    or (power is not None
-                       and float(power) != self._gain_power))
+                       and float(power) != self._gain_power)
+                   or segment != self._gain_segment_db
+                   or window != self._gain_agc_window or maximum != self._gain_agc_max_db)
         self._gain_mode = mode
+        self._gain_segment_db = segment
+        self._gain_agc_window, self._gain_agc_max_db = window, maximum
         if alpha is not None:
             self._gain_alpha = float(alpha)
         if db is not None:
@@ -503,11 +541,9 @@ class BScanViewDataMixin:
         self._apply_levels_to_render()
 
     def _gain_applied(self, mat):
-        """显示域增益变换：off 原样返回（零拷贝）；sec/tvg 返回逐行缩放结果。
+        """显示域增益变换。关闭时原样返回矩阵。
 
-        缓存按 (矩阵身份, 模式+参数) 判重——与海拔 warp 缓存同一纪律
-        （身份比较，不用 id()）。增益关闭时必须原样返回以保持「零拷贝 +
-        身份不变」语义（海拔 warp 缓存、回落判定都依赖它）。
+        模式、参数或采样轴变更时清除缓存。同一矩阵通过对象身份命中缓存。
         """
         if mat is not None and self.display_mode is BScanDisplayMode.ENVELOPE:
             if self._envelope_cache is None or self._envelope_cache[0] is not mat:
@@ -516,19 +552,19 @@ class BScanViewDataMixin:
         if mat is None or self._gain_mode == 'off':
             return mat
         cache = self._gain_cache
-        if (cache is not None and cache[0] is mat
-                and cache[1] == self._gain_mode
-                and cache[2] == self._gain_alpha
-                and cache[3] == self._gain_db
-                and cache[4] == self._gain_power):
-            return cache[5]
-        if self._gain_mode == 'sec':
-            gain = self._sec_row_gain(mat.shape[0])
+        if cache is not None and cache[0] is mat:
+            return cache[1]
+        if self._gain_mode == 'agc':
+            out = apply_display_agc(mat, self._gain_agc_window, self._gain_agc_max_db)
         else:
-            gain = self._tvg_row_gain(mat.shape[0])
-        out = np.asarray(mat) * gain[:, None]
-        self._gain_cache = (mat, self._gain_mode, self._gain_alpha,
-                            self._gain_db, self._gain_power, out)
+            if self._gain_mode == 'sec':
+                gain = self._sec_row_gain(mat.shape[0])
+            elif self._gain_mode == 'piecewise_tvg':
+                gain = self._piecewise_tvg_row_gain(mat.shape[0])
+            else:
+                gain = self._tvg_row_gain(mat.shape[0])
+            out = np.asarray(mat) * gain[:, None]
+        self._gain_cache = (mat, out)
         return out
 
     def _phys_depth_axis(self, n_rows: int):
@@ -570,16 +606,25 @@ class BScanViewDataMixin:
         深端恰为 10^(db/20)。power=1 线性递增，>1 增益向深部集中，
         <1 向浅部集中（滑条范围限 0.3~3.0）。限幅同 SEC（1000×）。
         """
-        arr = self._phys_depth_axis(n_rows)
-        if arr is not None:
-            span = float(np.ptp(arr))
-            u = (np.abs(arr - arr[0]) / span) if span > 0 else \
-                np.linspace(0.0, 1.0, n_rows)
-        else:
-            u = (np.arange(n_rows, dtype=np.float64) / max(n_rows - 1, 1))
+        u = self._normalized_sample_axis(n_rows)
         power = min(max(self._gain_power, 0.1), 10.0)
         gain = np.power(10.0, self._gain_db * np.power(u, power) / 20.0)
         return np.clip(gain, 1.0, 1000.0)
+
+    def _piecewise_tvg_row_gain(self, n_rows: int):
+        nodes = [{"tau": 0.0, "db": 0.0}]
+        nodes.extend({"tau": tau, "db": db} for (tau, _, _), db in
+                     zip(constants.BSCAN_TVG_NODES, self._gain_segment_db, strict=True))
+        return manual_gain_amplitude_factors(self._normalized_sample_axis(n_rows), nodes)
+
+    def _normalized_sample_axis(self, n_rows: int):
+        """Normalize the full physical axis or fall back to the full row index."""
+        axis = self._phys_depth_axis(n_rows)
+        if axis is not None:
+            span = float(np.ptp(axis))
+            if span > 0:
+                return np.abs(axis - axis[0]) / span
+        return np.linspace(0.0, 1.0, n_rows)
 
     def set_colorbar_visible(self, visible: bool, *, notify: bool = False) -> None:
         """切换右侧色标条的显示；隐藏后其宽度完整归还画布。

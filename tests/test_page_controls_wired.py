@@ -158,15 +158,18 @@ class TestSettingsGeneralPersist:
 
     def test_prefetch_check_emits_general_changed(self, qapp):
         page = self._page(qapp)
+        page._nav_buttons['spatial'].click()
         assert page._prefetch_check.receivers(
             page._prefetch_check.toggled) >= 1
         hits = []
         page.general_changed.connect(lambda: hits.append(1))
-        page._prefetch_check.setChecked(True)   # 默认未勾 → 勾选才状态变化
-        assert hits, '勾「自动预下载」必须通知主窗口写盘'
+        page._prefetch_check.setChecked(False)
+        assert hits, '切换「自动预下载」必须通知主窗口写盘'
 
     def test_other_general_controls_wired(self, qapp):
         page = self._page(qapp)
+        page._nav_buttons['processing'].click()
+        page._nav_buttons['storage'].click()
         assert page._dielectric_spin.receivers(
             page._dielectric_spin.valueChanged) >= 1
         assert page._workers_spin.receivers(
@@ -183,7 +186,20 @@ class TestSettingsGeneralPersist:
                             'max_workers': 4,
                             'project_root': 'D:/x'})
         assert hits == []
+        assert set(page._panels) == {'bscan'}
+        assert page.settings()['max_workers'] == 4
+        assert page.settings()['project_root'] == 'D:/x'
+        query = '并行工作线程数'
+        page._search.setText(query)
+        page._search.textEdited.emit(query)
+        assert 'processing' not in page._panels
+        page._open_first_result()
+        assert set(page._panels) == {'bscan', 'processing'}
+        assert page._workers_spin.value() == 4
+        assert page._dielectric_spin.value() == 9.5
+        page._nav_buttons['spatial'].click()
         assert page._prefetch_check.isChecked() is False
+        assert hits == []
 
 
 class TestMainWindowPersistsGeneralSettings:
@@ -209,16 +225,17 @@ class TestMainWindowPersistsGeneralSettings:
             pytest.skip('MainWindow 在本环境不可用')
         try:
             page = win._page('settingsInterface')
-            page._prefetch_check.setChecked(True)
-            assert sm.get('auto_prefetch_basemap') is True
-            assert 'auto_prefetch_basemap' in __import__('json').loads(
-                path.read_text(encoding='utf-8'))
+            page._nav_buttons['spatial'].click()
+            page._prefetch_check.setChecked(False)
+            assert sm.get('auto_prefetch_basemap') is False
+            assert __import__('json').loads(path.read_text(
+                encoding='utf-8'))['auto_prefetch_basemap'] is False
             ensure = getattr(win, 'ensure_pages_ready', None)
             if callable(ensure):
                 ensure()                      # 空间页是延迟构造页
             spatial = win._page('spatialInterface')
             if spatial is not None:
-                assert spatial._auto_prefetch_enabled is True
+                assert spatial._auto_prefetch_enabled is False
         finally:
             win.close()
 

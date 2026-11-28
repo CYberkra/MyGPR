@@ -10,11 +10,12 @@ import os
 APP_DIR_NAME = "MyGPR"
 
 
-def get_app_data_dir() -> str:
+def get_app_data_dir(*, create: bool = True) -> str:
     """Return the root writable directory for app settings/data."""
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     path = os.path.join(base, APP_DIR_NAME)
-    os.makedirs(path, exist_ok=True)
+    if create:
+        os.makedirs(path, exist_ok=True)
     return path
 
 
@@ -32,10 +33,11 @@ def get_logs_dir() -> str:
     return path
 
 
-def get_tile_cache_dir() -> str:
+def get_tile_cache_dir(*, create: bool = True) -> str:
     """Return the shared, user-writable basemap and terrain tile cache."""
-    path = os.path.join(get_app_data_dir(), "tile_cache")
-    os.makedirs(path, exist_ok=True)
+    path = os.path.join(get_app_data_dir(create=False), "tile_cache")
+    if create:
+        os.makedirs(path, exist_ok=True)
     return path
 
 
